@@ -4,28 +4,12 @@ import React, { useState } from "react";
 import Papa from "papaparse";
 import Encoding from "encoding-japanese";
 
-// ----------------------------------------------------------------------
-// 共通定数
-// ----------------------------------------------------------------------
-const RAKUTEN_OUTPUT_HEADERS = [
-  "取引日",
-  "出金金額（円）",
-  "入金金額（円）",
-  "海外出金金額",
-  "通貨",
-  "変換レート（円）",
-  "利用国",
-  "取引内容",
-  "取引先",
-  "取引方法",
-  "支払い区分",
-  "利用者",
-  "取引番号",
-];
+// ======================================================================
+// 1. 型定義 (Types)
+// ======================================================================
+type ActiveTab = "rakuten" | "paypay";
+type PayPayPreviewTab = "credit" | "balance" | "others";
 
-// ----------------------------------------------------------------------
-// 型定義
-// ----------------------------------------------------------------------
 interface RakutenLogState {
   totalInputRows: number;
   convertedRows: number;
@@ -49,18 +33,197 @@ interface PayPayReportState {
   othersFilename: string;
 }
 
-export default function MainApp() {
-  const [activeTab, setActiveTab] = useState<"rakuten" | "paypay">("rakuten");
+// ======================================================================
+// 2. 定数・共通ロジック (Utils & Constants)
+// ======================================================================
+const RAKUTEN_OUTPUT_HEADERS = [
+  "取引日",
+  "出金金額（円）",
+  "入金金額（円）",
+  "海外出金金額",
+  "通貨",
+  "変換レート（円）",
+  "利用国",
+  "取引内容",
+  "取引先",
+  "取引方法",
+  "支払い区分",
+  "利用者",
+  "取引番号",
+];
 
-  // ----------------------------------------------------------------------
-  // 楽天カード変換 State & Handlers
-  // ----------------------------------------------------------------------
+function detectTargetMonth(fileName: string, rows: Record<string, string>[], dateKeys: string[]): number | null {
+  const fileNameMatch = fileName.match(/(\d{1,2})月/) || fileName.match(/\d{4}(\d{2})/);
+  if (fileNameMatch) {
+    return parseInt(fileNameMatch[1], 10);
+  }
+
+  for (const row of rows) {
+    for (const key of dateKeys) {
+      const rawDate = row[key]?.trim();
+      if (rawDate) {
+        const dateObj = new Date(rawDate.replace(/\//g, "-"));
+        if (!isNaN(dateObj.getTime())) {
+          return dateObj.getMonth() + 1;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const buffer = event.target?.result as ArrayBuffer;
+        if (!buffer) return resolve("");
+        const uint8Array = new Uint8Array(buffer);
+        const detectedEncoding = Encoding.detect(uint8Array);
+        const unicodeString = Encoding.convert(uint8Array, {
+          to: "UNICODE",
+          from: detectedEncoding || "AUTO",
+          type: "string",
+        });
+        resolve(unicodeString);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function downloadCsv(data: Record<string, string>[], filename: string, columns?: string[]) {
+  if (!data || data.length === 0) return;
+  const csvString = Papa.unparse(data, {
+    columns: columns,
+    newline: "\r\n",
+  });
+  const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+  const blob = new Blob([bom, csvString], { type: "text/csv;charset=utf-8;" });
+
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// ======================================================================
+// 3. UI コンポーネント (Sub-Components)
+// ======================================================================
+
+function FileUploader({
+  id,
+  accept,
+  label,
+  subLabel,
+  processing,
+  accentColor,
+  onFileSelect,
+}: {
+  id: string;
+  accept: string;
+  label: string;
+  subLabel: string;
+  processing: boolean;
+  accentColor: "blue" | "red";
+  onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  const isBlue = accentColor === "blue";
+  return (
+    <div
+      className={`border-2 border-dashed rounded-xl p-5 text-center bg-white dark:bg-gray-900 shadow-sm transition-colors mb-5 ${
+        isBlue
+          ? "border-blue-500 hover:border-blue-600 dark:border-blue-600"
+          : "border-red-500 hover:border-red-600 dark:border-red-600"
+      }`}
+    >
+      <label
+        htmlFor={id}
+        className={`inline-block text-white px-5 py-3 rounded-lg font-bold text-sm cursor-pointer w-full max-w-xs transition-opacity ${
+          isBlue ? "bg-blue-600 hover:bg-blue-700" : "bg-red-600 hover:bg-red-700"
+        } ${processing ? "opacity-50 cursor-not-allowed" : ""}`}
+      >
+        {label}
+      </label>
+      <input
+        id={id}
+        type="file"
+        accept={accept}
+        onChange={onFileSelect}
+        disabled={processing}
+        className="hidden"
+      />
+      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-0">{subLabel}</p>
+      {processing && (
+        <p className={`mt-2 font-bold text-sm ${isBlue ? "text-blue-600" : "text-red-600"}`}>
+          ⏳ 処理中...
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TransactionCard({
+  index,
+  date,
+  amount,
+  title,
+  subInfo,
+}: {
+  index: number;
+  date: string;
+  amount: string;
+  title: string;
+  subInfo?: string;
+}) {
+  return (
+    <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-2.5 sm:p-3 bg-gray-50 dark:bg-gray-800/60 text-xs sm:text-sm transition-colors">
+      <div className="flex justify-between items-center mb-1">
+        <span className="text-gray-500 dark:text-gray-400 text-[11px] sm:text-xs">
+          #{index} | {date}
+        </span>
+        <span className="font-bold text-red-600 dark:text-red-400 text-xs sm:text-sm">
+          ￥{amount}
+        </span>
+      </div>
+      <div className="font-bold text-gray-900 dark:text-gray-100 text-xs sm:text-sm break-all">
+        {title}
+      </div>
+      {subInfo && (
+        <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+          {subInfo}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ======================================================================
+// 4. メインコンポーネント (Main App)
+// ======================================================================
+export default function MainApp() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>("rakuten");
+
   const [rakutenLogs, setRakutenLogs] = useState<RakutenLogState | null>(null);
   const [rakutenError, setRakutenError] = useState<string>("");
   const [rakutenProcessing, setRakutenProcessing] = useState<boolean>(false);
   const [rakutenDownloaded, setRakutenDownloaded] = useState<boolean>(false);
 
-  const handleRakutenUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [paypayReport, setPaypayReport] = useState<PayPayReportState | null>(null);
+  const [paypayError, setPaypayError] = useState<string>("");
+  const [paypayProcessing, setPaypayProcessing] = useState<boolean>(false);
+  const [previewTab, setPreviewTab] = useState<PayPayPreviewTab>("credit");
+  const [downloadedPayPayFiles, setDownloadedPayPayFiles] = useState<Record<string, boolean>>({});
+
+  const handleRakutenUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -69,37 +232,23 @@ export default function MainApp() {
     setRakutenLogs(null);
     setRakutenDownloaded(false);
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const buffer = event.target?.result as ArrayBuffer;
-        if (!buffer) return;
-
-        const uint8Array = new Uint8Array(buffer);
-        const detectedEncoding = Encoding.detect(uint8Array);
-        const unicodeString = Encoding.convert(uint8Array, {
-          to: "UNICODE",
-          from: detectedEncoding || "AUTO",
-          type: "string",
-        });
-
-        Papa.parse<Record<string, string>>(unicodeString, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => {
-            processRakutenCsv(results.data, file.name);
-          },
-          error: (err: Error) => {
-            setRakutenError(`CSVパースエラー: ${err.message}`);
-            setRakutenProcessing(false);
-          },
-        });
-      } catch (err) {
-        setRakutenError("ファイルの読み込み中にエラーが発生しました。");
-        setRakutenProcessing(false);
-      }
-    };
-    reader.readAsArrayBuffer(file);
+    try {
+      const csvText = await readFileAsText(file);
+      Papa.parse<Record<string, string>>(csvText, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          processRakutenCsv(results.data, file.name);
+        },
+        error: (err: Error) => {
+          setRakutenError(`CSVパースエラー: ${err.message}`);
+          setRakutenProcessing(false);
+        },
+      });
+    } catch (err) {
+      setRakutenError("ファイルの読み込み中にエラーが発生しました。");
+      setRakutenProcessing(false);
+    }
   };
 
   const processRakutenCsv = (rawData: Record<string, string>[], fileName: string) => {
@@ -128,15 +277,12 @@ export default function MainApp() {
     const excludedRows = totalInputRows - validRows.length;
     const convertedRows = validRows.length;
     const convertedData: Record<string, string>[] = [];
-    let targetMonth: number | null = null;
+
+    const targetMonth = detectTargetMonth(fileName, validRows, ["利用日"]);
 
     validRows.forEach((row, index) => {
       const rawDateStr = row["利用日"]?.trim();
       const dateObj = new Date(rawDateStr.replace(/\//g, "-"));
-
-      if (targetMonth === null && !isNaN(dateObj.getTime())) {
-        targetMonth = dateObj.getMonth() + 1;
-      }
 
       const secOffset = index + 1;
       const hh = String(Math.floor(secOffset / 3600) % 24).padStart(2, "0");
@@ -177,11 +323,6 @@ export default function MainApp() {
       });
     });
 
-    const monthMatch = fileName.match(/(\d{1,2})月/) || fileName.match(/\d{4}(\d{2})/);
-    if (monthMatch) {
-      targetMonth = parseInt(monthMatch[1], 10);
-    }
-
     const outputFilename = targetMonth
       ? `楽天カード${targetMonth}月分_MoneyForward取込用.csv`
       : "楽天カード_MoneyForward取込用.csv";
@@ -199,34 +340,11 @@ export default function MainApp() {
 
   const handleRakutenDownload = () => {
     if (!rakutenLogs) return;
-    const csvString = Papa.unparse(rakutenLogs.convertedData, {
-      columns: RAKUTEN_OUTPUT_HEADERS,
-      newline: "\r\n",
-    });
-    const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
-    const blob = new Blob([bom, csvString], { type: "text/csv;charset=utf-8;" });
-
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", rakutenLogs.outputFilename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
+    downloadCsv(rakutenLogs.convertedData, rakutenLogs.outputFilename, RAKUTEN_OUTPUT_HEADERS);
     setRakutenDownloaded(true);
   };
 
-  // ----------------------------------------------------------------------
-  // PayPay仕分け State & Handlers
-  // ----------------------------------------------------------------------
-  const [paypayReport, setPaypayReport] = useState<PayPayReportState | null>(null);
-  const [paypayError, setPaypayError] = useState<string>("");
-  const [paypayProcessing, setPaypayProcessing] = useState<boolean>(false);
-  const [previewTab, setPreviewTab] = useState<"credit" | "balance" | "others">("credit");
-  const [downloadedPayPayFiles, setDownloadedPayPayFiles] = useState<Record<string, boolean>>({});
-
-  const handlePaypayUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePaypayUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -235,37 +353,23 @@ export default function MainApp() {
     setPaypayReport(null);
     setDownloadedPayPayFiles({});
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const buffer = event.target?.result as ArrayBuffer;
-        if (!buffer) return;
-
-        const uint8Array = new Uint8Array(buffer);
-        const detectedEncoding = Encoding.detect(uint8Array);
-        const unicodeString = Encoding.convert(uint8Array, {
-          to: "UNICODE",
-          from: detectedEncoding || "AUTO",
-          type: "string",
-        });
-
-        Papa.parse<Record<string, string>>(unicodeString, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => {
-            processPayPayData(results.data, file.name);
-          },
-          error: (err: Error) => {
-            setPaypayError(`CSVパースエラー: ${err.message}`);
-            setPaypayProcessing(false);
-          },
-        });
-      } catch (err) {
-        setPaypayError("ファイルの読み込み中にエラーが発生しました。");
-        setPaypayProcessing(false);
-      }
-    };
-    reader.readAsArrayBuffer(file);
+    try {
+      const csvText = await readFileAsText(file);
+      Papa.parse<Record<string, string>>(csvText, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          processPayPayData(results.data, file.name);
+        },
+        error: (err: Error) => {
+          setPaypayError(`CSVパースエラー: ${err.message}`);
+          setPaypayProcessing(false);
+        },
+      });
+    } catch (err) {
+      setPaypayError("ファイルの読み込み中にエラーが発生しました。");
+      setPaypayProcessing(false);
+    }
   };
 
   const processPayPayData = (df: Record<string, string>[], fileName: string) => {
@@ -283,26 +387,7 @@ export default function MainApp() {
       return;
     }
 
-    let targetMonth: number | null = null;
-
-    const fileNameMatch = fileName.match(/(\d{1,2})月/) || fileName.match(/\d{4}(\d{2})/);
-    if (fileNameMatch) {
-      targetMonth = parseInt(fileNameMatch[1], 10);
-    }
-
-    if (targetMonth === null) {
-      for (const row of df) {
-        const rawDate = row["取引日時"] || row["取引日"] || "";
-        if (rawDate) {
-          const dateObj = new Date(rawDate.replace(/\//g, "-"));
-          if (!isNaN(dateObj.getTime())) {
-            targetMonth = dateObj.getMonth() + 1;
-            break;
-          }
-        }
-      }
-    }
-
+    const targetMonth = detectTargetMonth(fileName, df, ["取引日時", "取引日"]);
     const monthPrefix = targetMonth ? `${targetMonth}月分_` : "";
 
     const dfFiltered = df.filter((row) => (row["取引方法"] || "").trim() !== "PayPayポイント");
@@ -352,19 +437,7 @@ export default function MainApp() {
   };
 
   const handlePaypayDownload = (data: Record<string, string>[], filename: string, key: string) => {
-    if (!data || data.length === 0) return;
-    const csvString = Papa.unparse(data, { newline: "\r\n" });
-    const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
-    const blob = new Blob([bom, csvString], { type: "text/csv;charset=utf-8;" });
-
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
+    downloadCsv(data, filename);
     setDownloadedPayPayFiles((prev) => ({ ...prev, [key]: true }));
   };
 
@@ -375,165 +448,105 @@ export default function MainApp() {
     return paypayReport.othersData;
   };
 
-  // ----------------------------------------------------------------------
-  // レンダリング
-  // ----------------------------------------------------------------------
   return (
-    <main style={{ width: "100%", maxWidth: "100vw", boxSizing: "border-box", margin: "0 auto", padding: "16px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: "#1a1a1a", backgroundColor: "#f8f9fa", minHeight: "100vh", overflowX: "hidden" }}>
-      
-      {/* メニュータブ */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "20px", backgroundColor: "#e9ecef", padding: "4px", borderRadius: "10px" }}>
+    <main className="w-full max-w-full min-h-screen m-0 p-4 font-sans bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 transition-colors">
+      <div className="flex gap-2 mb-5 bg-gray-200 dark:bg-gray-800 p-1 rounded-xl">
         <button
           onClick={() => setActiveTab("rakuten")}
-          style={{
-            flex: 1,
-            padding: "10px 4px",
-            fontSize: "13px",
-            fontWeight: "bold",
-            borderRadius: "8px",
-            border: "none",
-            cursor: "pointer",
-            backgroundColor: activeTab === "rakuten" ? "#ffffff" : "transparent",
-            color: activeTab === "rakuten" ? "#0066cc" : "#666666",
-            boxShadow: activeTab === "rakuten" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-            transition: "all 0.2s"
-          }}
+          className={`flex-1 py-2.5 px-1 text-xs sm:text-sm font-bold rounded-lg border-none cursor-pointer transition-all ${
+            activeTab === "rakuten"
+              ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm"
+              : "bg-transparent text-gray-600 dark:text-gray-400"
+          }`}
         >
           💳 楽天カード変換
         </button>
         <button
           onClick={() => setActiveTab("paypay")}
-          style={{
-            flex: 1,
-            padding: "10px 4px",
-            fontSize: "13px",
-            fontWeight: "bold",
-            borderRadius: "8px",
-            border: "none",
-            cursor: "pointer",
-            backgroundColor: activeTab === "paypay" ? "#ffffff" : "transparent",
-            color: activeTab === "paypay" ? "#ff0033" : "#666666",
-            boxShadow: activeTab === "paypay" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-            transition: "all 0.2s"
-          }}
+          className={`flex-1 py-2.5 px-1 text-xs sm:text-sm font-bold rounded-lg border-none cursor-pointer transition-all ${
+            activeTab === "paypay"
+              ? "bg-white dark:bg-gray-900 text-red-600 dark:text-red-400 shadow-sm"
+              : "bg-transparent text-gray-600 dark:text-gray-400"
+          }`}
         >
           📱 PayPay仕分け
         </button>
       </div>
 
-      {/* 💳 楽天カード画面 */}
       {activeTab === "rakuten" && (
         <div>
-          <header style={{ textAlign: "center", marginBottom: "16px" }}>
-            <h1 style={{ fontSize: "18px", margin: 0, color: "#1a1a1a" }}>💳 楽天カード明細 変換</h1>
+          <header className="text-center mb-4">
+            <h1 className="text-base sm:text-lg font-bold m-0">💳 楽天カード明細 変換</h1>
           </header>
 
-          <div style={{
-            border: "2px dashed #0066cc",
-            borderRadius: "12px",
-            padding: "20px 12px",
-            textAlign: "center",
-            backgroundColor: "#ffffff",
-            marginBottom: "20px",
-            boxSizing: "border-box",
-            width: "100%",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
-          }}>
-            <label htmlFor="rakuten-file" style={{
-              display: "inline-block",
-              backgroundColor: "#0066cc",
-              color: "#ffffff",
-              padding: "12px 20px",
-              borderRadius: "8px",
-              fontWeight: "bold",
-              fontSize: "14px",
-              cursor: "pointer",
-              width: "100%",
-              maxWidth: "280px",
-              boxSizing: "border-box"
-            }}>
-              📁 CSVファイルを選択
-            </label>
-            <input
-              id="rakuten-file"
-              type="file"
-              accept=".csv"
-              onChange={handleRakutenUpload}
-              disabled={rakutenProcessing}
-              style={{ display: "none" }}
-            />
-            <p style={{ fontSize: "11px", color: "#666666", marginTop: "10px", marginBottom: 0 }}>
-              タップして楽天カード明細CSVを選択してください
-            </p>
-            {rakutenProcessing && <p style={{ marginTop: "10px", color: "#0066cc", fontWeight: "bold" }}>⏳ 処理中...</p>}
-          </div>
+          <FileUploader
+            id="rakuten-file"
+            accept=".csv"
+            label="📁 CSVファイルを選択"
+            subLabel="タップして楽天カード明細CSVを選択してください"
+            processing={rakutenProcessing}
+            accentColor="blue"
+            onFileSelect={handleRakutenUpload}
+          />
 
           {rakutenError && (
-            <div style={{ backgroundColor: "#ffebee", color: "#c62828", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "13px" }}>
+            <div className="bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 p-3 rounded-lg mb-5 text-xs sm:text-sm border border-red-200 dark:border-red-900">
               ❌ {rakutenError}
             </div>
           )}
 
           {rakutenLogs && (
-            <div style={{ border: "1px solid #e0e0e0", borderRadius: "12px", padding: "16px", backgroundColor: "#ffffff", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
-              <h2 style={{ fontSize: "15px", marginTop: 0, marginBottom: "12px", borderBottom: "1px solid #eee", paddingBottom: "8px", color: "#1a1a1a" }}>📊 処理完了レポート</h2>
+            <div className="border border-gray-200 dark:border-gray-800 rounded-xl p-4 bg-white dark:bg-gray-900 shadow-sm">
+              <h2 className="text-sm sm:text-base font-bold mt-0 mb-3 border-b border-gray-100 dark:border-gray-800 pb-2">
+                📊 処理完了レポート
+              </h2>
               
-              <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
-                <div style={{ flex: 1, backgroundColor: "#f5f5f5", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
-                  <div style={{ fontSize: "10px", color: "#666666" }}>入力件数</div>
-                  <div style={{ fontWeight: "bold", fontSize: "15px", color: "#1a1a1a" }}>{rakutenLogs.totalInputRows}件</div>
+              <div className="flex gap-2 mb-3">
+                <div className="flex-1 bg-gray-100 dark:bg-gray-800/80 p-2 rounded-lg text-center">
+                  <div className="text-[10px] text-gray-500 dark:text-gray-400">入力件数</div>
+                  <div className="font-bold text-sm sm:text-base">{rakutenLogs.totalInputRows}件</div>
                 </div>
-                <div style={{ flex: 1, backgroundColor: "#e8f5e9", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
-                  <div style={{ fontSize: "10px", color: "#2e7d32" }}>変換成功</div>
-                  <div style={{ fontWeight: "bold", fontSize: "15px", color: "#2e7d32" }}>{rakutenLogs.convertedRows}件</div>
+                <div className="flex-1 bg-green-50 dark:bg-green-950/40 p-2 rounded-lg text-center">
+                  <div className="text-[10px] text-green-700 dark:text-green-400">変換成功</div>
+                  <div className="font-bold text-sm sm:text-base text-green-700 dark:text-green-400">
+                    {rakutenLogs.convertedRows}件
+                  </div>
                 </div>
               </div>
 
-              <p style={{ fontSize: "12px", color: "#444444", margin: "6px 0", wordBreak: "break-all" }}>
+              <p className="text-xs text-gray-700 dark:text-gray-300 my-1.5 break-all">
                 📄 <strong>保存名:</strong><br />{rakutenLogs.outputFilename}
               </p>
 
               {rakutenLogs.excludedRows > 0 && (
-                <p style={{ fontSize: "11px", color: "#e65100", backgroundColor: "#fff3e0", padding: "8px", borderRadius: "6px", margin: "8px 0" }}>
+                <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2 rounded-lg my-2 border border-amber-200 dark:border-amber-900">
                   ℹ️ ETC乗降区間など利用日なし {rakutenLogs.excludedRows} 件を自動除外しました
                 </p>
               )}
 
               <button
                 onClick={handleRakutenDownload}
-                style={{
-                  width: "100%",
-                  backgroundColor: rakutenDownloaded ? "#4caf50" : "#2e7d32",
-                  color: "#ffffff",
-                  border: "none",
-                  padding: "16px",
-                  borderRadius: "8px",
-                  fontWeight: "bold",
-                  fontSize: "15px",
-                  cursor: "pointer",
-                  margin: "16px 0",
-                  boxShadow: "0 4px 6px rgba(46,125,50,0.2)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "8px"
-                }}
+                className={`w-full text-white border-none p-3.5 rounded-lg font-bold text-sm cursor-pointer my-4 shadow-md transition-colors flex items-center justify-center gap-2 ${
+                  rakutenDownloaded
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-green-700 hover:bg-green-800"
+                }`}
               >
                 {rakutenDownloaded ? "✅ 保存済み (再ダウンロード)" : "📥 変換後CSVを保存する"}
               </button>
 
-              <h3 style={{ fontSize: "13px", marginTop: "16px", marginBottom: "8px", color: "#1a1a1a" }}>
+              <h3 className="text-xs sm:text-sm font-bold mt-4 mb-2">
                 ▼ プレビュー (全 {rakutenLogs.convertedData.length} 件)
               </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "350px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", backgroundColor: "#ffffff" }}>
+              <div className="flex flex-col gap-2 max-h-[50vh] sm:max-h-[60vh] overflow-y-auto border border-gray-100 dark:border-gray-800 p-2 rounded-lg bg-gray-50/50 dark:bg-gray-950/50">
                 {rakutenLogs.convertedData.map((row, idx) => (
-                  <div key={idx} style={{ border: "1px solid #e0e0e0", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                      <span style={{ color: "#666666", fontSize: "11px" }}>#{idx + 1} | {row["取引日"]}</span>
-                      <span style={{ fontWeight: "bold", color: "#d32f2f", fontSize: "13px" }}>￥{row["出金金額（円）"]}</span>
-                    </div>
-                    <div style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "12px", wordBreak: "break-all" }}>{row["取引先"]}</div>
-                  </div>
+                  <TransactionCard
+                    key={idx}
+                    index={idx + 1}
+                    date={row["取引日"]}
+                    amount={row["出金金額（円）"]}
+                    title={row["取引先"]}
+                  />
                 ))}
               </div>
             </div>
@@ -541,66 +554,37 @@ export default function MainApp() {
         </div>
       )}
 
-      {/* 📱 PayPay画面 */}
       {activeTab === "paypay" && (
         <div>
-          <header style={{ textAlign: "center", marginBottom: "16px" }}>
-            <h1 style={{ fontSize: "18px", margin: 0, color: "#1a1a1a" }}>📱 PayPay明細 自動仕分け</h1>
+          <header className="text-center mb-4">
+            <h1 className="text-base sm:text-lg font-bold m-0">📱 PayPay明細 自動仕分け</h1>
           </header>
 
-          <div style={{
-            border: "2px dashed #ff0033",
-            borderRadius: "12px",
-            padding: "20px 12px",
-            textAlign: "center",
-            backgroundColor: "#ffffff",
-            marginBottom: "20px",
-            boxSizing: "border-box",
-            width: "100%",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
-          }}>
-            <label htmlFor="paypay-file" style={{
-              display: "inline-block",
-              backgroundColor: "#ff0033",
-              color: "#ffffff",
-              padding: "12px 20px",
-              borderRadius: "8px",
-              fontWeight: "bold",
-              fontSize: "14px",
-              cursor: "pointer",
-              width: "100%",
-              maxWidth: "280px",
-              boxSizing: "border-box"
-            }}>
-              📁 CSVファイルを選択
-            </label>
-            <input
-              id="paypay-file"
-              type="file"
-              accept=".csv"
-              onChange={handlePaypayUpload}
-              disabled={paypayProcessing}
-              style={{ display: "none" }}
-            />
-            <p style={{ fontSize: "11px", color: "#666666", marginTop: "10px", marginBottom: 0 }}>
-              タップしてPayPay明細CSVを選択してください
-            </p>
-            {paypayProcessing && <p style={{ marginTop: "10px", color: "#ff0033", fontWeight: "bold" }}>⏳ 処理中...</p>}
-          </div>
+          <FileUploader
+            id="paypay-file"
+            accept=".csv"
+            label="📁 CSVファイルを選択"
+            subLabel="タップしてPayPay明細CSVを選択してください"
+            processing={paypayProcessing}
+            accentColor="red"
+            onFileSelect={handlePaypayUpload}
+          />
 
           {paypayError && (
-            <div style={{ backgroundColor: "#ffebee", color: "#c62828", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "13px" }}>
+            <div className="bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 p-3 rounded-lg mb-5 text-xs sm:text-sm border border-red-200 dark:border-red-900">
               ❌ {paypayError}
             </div>
           )}
 
           {paypayReport && (
-            <div style={{ border: "1px solid #e0e0e0", borderRadius: "12px", padding: "16px", backgroundColor: "#ffffff", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
-              <h2 style={{ fontSize: "15px", marginTop: 0, marginBottom: "12px", borderBottom: "1px solid #eee", paddingBottom: "8px", color: "#1a1a1a" }}>📊 処理結果サマリー</h2>
+            <div className="border border-gray-200 dark:border-gray-800 rounded-xl p-4 bg-white dark:bg-gray-900 shadow-sm">
+              <h2 className="text-sm sm:text-base font-bold mt-0 mb-3 border-b border-gray-100 dark:border-gray-800 pb-2">
+                📊 処理結果サマリー
+              </h2>
               
-              <div style={{ fontSize: "13px", lineHeight: "1.8", color: "#333333", marginBottom: "16px" }}>
+              <div className="text-xs sm:text-sm leading-relaxed mb-4">
                 <div>📥 <strong>入力データ総数:</strong> {paypayReport.totalRows} 件</div>
-                <div style={{ paddingLeft: "8px", borderLeft: "3px solid #ddd", margin: "8px 0" }}>
+                <div className="pl-2 border-l-2 border-gray-300 dark:border-gray-700 my-2 space-y-0.5 text-xs text-gray-600 dark:text-gray-400">
                   <div>1️⃣ 除外 (ポイント) : {paypayReport.excludedPoints} 件</div>
                   <div>2️⃣ クレジット抽出 : {paypayReport.creditData.length} 件</div>
                   <div>3️⃣ 残高払い抽出 : {paypayReport.paypayBalanceData.length} 件</div>
@@ -608,190 +592,140 @@ export default function MainApp() {
                 </div>
               </div>
 
-              <div style={{ backgroundColor: "#f9f9f9", borderRadius: "8px", padding: "12px", marginBottom: "16px" }}>
-                <div style={{ fontWeight: "bold", fontSize: "12px", marginBottom: "6px" }}>【診断結果】</div>
-                <div style={{ fontSize: "12px", color: paypayReport.isCountOk ? "#2e7d32" : "#c62828", margin: "2px 0" }}>
+              <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 mb-4">
+                <div className="font-bold text-xs mb-1">【診断結果】</div>
+                <div className={`text-xs my-0.5 ${paypayReport.isCountOk ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                   {paypayReport.isCountOk
                     ? "✅ データの漏れはありません（件数一致）"
-                    : `❌ 警告：件数が一致しません`}
+                    : "❌ 警告：件数が一致しません"}
                 </div>
-                <div style={{ fontSize: "12px", color: !paypayReport.hasOthers ? "#2e7d32" : "#ef6c00", margin: "2px 0" }}>
+                <div className={`text-xs my-0.5 ${!paypayReport.hasOthers ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
                   {!paypayReport.hasOthers
                     ? "✅ 全てのデータが正しく分類されました"
                     : `⚠️ 注意：未分類のデータが ${paypayReport.othersData.length} 件あります`}
                 </div>
               </div>
 
-              {/* 各CSV個別ダウンロードボタン（保存済みステータス付き） */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
+              <div className="flex flex-col gap-2.5 mb-5">
                 <button
                   onClick={() => handlePaypayDownload(paypayReport.creditData, paypayReport.creditFilename, "credit")}
                   disabled={paypayReport.creditData.length === 0}
-                  style={{
-                    width: "100%",
-                    backgroundColor: paypayReport.creditData.length === 0 ? "#ccc" : downloadedPayPayFiles["credit"] ? "#2e7d32" : "#0066cc",
-                    color: "#ffffff",
-                    border: "none",
-                    padding: "12px",
-                    borderRadius: "8px",
-                    fontWeight: "bold",
-                    fontSize: "13px",
-                    cursor: paypayReport.creditData.length > 0 ? "pointer" : "not-allowed",
-                    textAlign: "left",
-                    position: "relative",
-                    transition: "background-color 0.2s"
-                  }}
+                  className={`w-full text-white border-none p-3 rounded-lg font-bold text-xs sm:text-sm cursor-pointer text-left transition-colors ${
+                    paypayReport.creditData.length === 0
+                      ? "bg-gray-300 dark:bg-gray-800 text-gray-500 cursor-not-allowed"
+                      : downloadedPayPayFiles["credit"]
+                      ? "bg-emerald-600 hover:bg-emerald-700"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }`}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div className="flex justify-between items-center">
                     <span>📥 クレジット保存 ({paypayReport.creditData.length}件)</span>
                     {downloadedPayPayFiles["credit"] && (
-                      <span style={{ backgroundColor: "#ffffff", color: "#2e7d32", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: "bold" }}>
+                      <span className="bg-white text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-bold">
                         ✅ 保存済み
                       </span>
                     )}
                   </div>
-                  <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal", display: "block", marginTop: "2px" }}>📄 {paypayReport.creditFilename}</span>
+                  <span className="text-[10px] opacity-85 font-normal block mt-0.5">📄 {paypayReport.creditFilename}</span>
                 </button>
 
                 <button
                   onClick={() => handlePaypayDownload(paypayReport.paypayBalanceData, paypayReport.balanceFilename, "balance")}
                   disabled={paypayReport.paypayBalanceData.length === 0}
-                  style={{
-                    width: "100%",
-                    backgroundColor: paypayReport.paypayBalanceData.length === 0 ? "#ccc" : downloadedPayPayFiles["balance"] ? "#2e7d32" : "#ff0033",
-                    color: "#ffffff",
-                    border: "none",
-                    padding: "12px",
-                    borderRadius: "8px",
-                    fontWeight: "bold",
-                    fontSize: "13px",
-                    cursor: paypayReport.paypayBalanceData.length > 0 ? "pointer" : "not-allowed",
-                    textAlign: "left",
-                    position: "relative",
-                    transition: "background-color 0.2s"
-                  }}
+                  className={`w-full text-white border-none p-3 rounded-lg font-bold text-xs sm:text-sm cursor-pointer text-left transition-colors ${
+                    paypayReport.paypayBalanceData.length === 0
+                      ? "bg-gray-300 dark:bg-gray-800 text-gray-500 cursor-not-allowed"
+                      : downloadedPayPayFiles["balance"]
+                      ? "bg-emerald-600 hover:bg-emerald-700"
+                      : "bg-red-600 hover:bg-red-700"
+                  }`}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div className="flex justify-between items-center">
                     <span>📥 残高払い保存 ({paypayReport.paypayBalanceData.length}件)</span>
                     {downloadedPayPayFiles["balance"] && (
-                      <span style={{ backgroundColor: "#ffffff", color: "#2e7d32", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: "bold" }}>
+                      <span className="bg-white text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-bold">
                         ✅ 保存済み
                       </span>
                     )}
                   </div>
-                  <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal", display: "block", marginTop: "2px" }}>📄 {paypayReport.balanceFilename}</span>
+                  <span className="text-[10px] opacity-85 font-normal block mt-0.5">📄 {paypayReport.balanceFilename}</span>
                 </button>
 
                 {paypayReport.hasOthers && (
                   <button
                     onClick={() => handlePaypayDownload(paypayReport.othersData, paypayReport.othersFilename, "others")}
-                    style={{
-                      width: "100%",
-                      backgroundColor: downloadedPayPayFiles["others"] ? "#2e7d32" : "#e65100",
-                      color: "#ffffff",
-                      border: "none",
-                      padding: "12px",
-                      borderRadius: "8px",
-                      fontWeight: "bold",
-                      fontSize: "13px",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      position: "relative",
-                      transition: "background-color 0.2s"
-                    }}
+                    className={`w-full text-white border-none p-3 rounded-lg font-bold text-xs sm:text-sm cursor-pointer text-left transition-colors ${
+                      downloadedPayPayFiles["others"]
+                        ? "bg-emerald-600 hover:bg-emerald-700"
+                        : "bg-amber-600 hover:bg-amber-700"
+                    }`}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div className="flex justify-between items-center">
                       <span>⚠️ 未分類(その他)保存 ({paypayReport.othersData.length}件)</span>
                       {downloadedPayPayFiles["others"] && (
-                        <span style={{ backgroundColor: "#ffffff", color: "#2e7d32", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: "bold" }}>
+                        <span className="bg-white text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-bold">
                           ✅ 保存済み
                         </span>
                       )}
                     </div>
-                    <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal", display: "block", marginTop: "2px" }}>📄 {paypayReport.othersFilename}</span>
+                    <span className="text-[10px] opacity-85 font-normal block mt-0.5">📄 {paypayReport.othersFilename}</span>
                   </button>
                 )}
               </div>
 
-              {/* ファイル単位でのプレビュー切り替えタブ */}
-              <div style={{ marginTop: "20px", borderTop: "1px solid #eee", paddingTop: "16px" }}>
-                <h3 style={{ fontSize: "14px", marginTop: 0, marginBottom: "10px", color: "#1a1a1a" }}>
+              <div className="mt-5 border-t border-gray-100 dark:border-gray-800 pt-4">
+                <h3 className="text-xs sm:text-sm font-bold mt-0 mb-2">
                   ▼ 生成ファイル別 プレビュー
                 </h3>
 
-                <div style={{ display: "flex", gap: "4px", marginBottom: "10px", backgroundColor: "#f0f0f0", padding: "3px", borderRadius: "8px" }}>
+                <div className="flex gap-1 mb-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
                   <button
                     onClick={() => setPreviewTab("credit")}
-                    style={{
-                      flex: 1,
-                      padding: "8px 2px",
-                      fontSize: "11px",
-                      fontWeight: "bold",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      backgroundColor: previewTab === "credit" ? "#ffffff" : "transparent",
-                      color: previewTab === "credit" ? "#0066cc" : "#666666",
-                      boxShadow: previewTab === "credit" ? "0 1px 2px rgba(0,0,0,0.1)" : "none"
-                    }}
+                    className={`flex-1 py-1.5 px-1 text-[11px] font-bold border-none rounded-md cursor-pointer transition-all ${
+                      previewTab === "credit"
+                        ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm"
+                        : "bg-transparent text-gray-500 dark:text-gray-400"
+                    }`}
                   >
                     クレジット ({paypayReport.creditData.length})
                   </button>
                   <button
                     onClick={() => setPreviewTab("balance")}
-                    style={{
-                      flex: 1,
-                      padding: "8px 2px",
-                      fontSize: "11px",
-                      fontWeight: "bold",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      backgroundColor: previewTab === "balance" ? "#ffffff" : "transparent",
-                      color: previewTab === "balance" ? "#ff0033" : "#666666",
-                      boxShadow: previewTab === "balance" ? "0 1px 2px rgba(0,0,0,0.1)" : "none"
-                    }}
+                    className={`flex-1 py-1.5 px-1 text-[11px] font-bold border-none rounded-md cursor-pointer transition-all ${
+                      previewTab === "balance"
+                        ? "bg-white dark:bg-gray-900 text-red-600 dark:text-red-400 shadow-sm"
+                        : "bg-transparent text-gray-500 dark:text-gray-400"
+                    }`}
                   >
                     残高払い ({paypayReport.paypayBalanceData.length})
                   </button>
                   <button
                     onClick={() => setPreviewTab("others")}
-                    style={{
-                      flex: 1,
-                      padding: "8px 2px",
-                      fontSize: "11px",
-                      fontWeight: "bold",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      backgroundColor: previewTab === "others" ? "#ffffff" : "transparent",
-                      color: previewTab === "others" ? "#e65100" : "#666666",
-                      boxShadow: previewTab === "others" ? "0 1px 2px rgba(0,0,0,0.1)" : "none"
-                    }}
+                    className={`flex-1 py-1.5 px-1 text-[11px] font-bold border-none rounded-md cursor-pointer transition-all ${
+                      previewTab === "others"
+                        ? "bg-white dark:bg-gray-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                        : "bg-transparent text-gray-500 dark:text-gray-400"
+                    }`}
                   >
                     未分類 ({paypayReport.othersData.length})
                   </button>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "300px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", backgroundColor: "#ffffff" }}>
+                <div className="flex flex-col gap-2 max-h-[45vh] sm:max-h-[55vh] overflow-y-auto border border-gray-100 dark:border-gray-800 p-2 rounded-lg bg-gray-50/50 dark:bg-gray-950/50">
                   {getActivePreviewData().length === 0 ? (
-                    <div style={{ textAlign: "center", padding: "20px", color: "#999999", fontSize: "12px" }}>
+                    <div className="text-center py-5 text-gray-400 text-xs">
                       該当するデータはありません
                     </div>
                   ) : (
                     getActivePreviewData().map((row, idx) => (
-                      <div key={idx} style={{ border: "1px solid #e0e0e0", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                          <span style={{ color: "#666666", fontSize: "11px" }}>#{idx + 1} | {row["取引日時"] || row["取引日"] || "日付なし"}</span>
-                          <span style={{ fontWeight: "bold", color: "#d32f2f", fontSize: "13px" }}>￥{row["金額（円）"] || row["出金金額（円）"] || "0"}</span>
-                        </div>
-                        <div style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "12px", wordBreak: "break-all" }}>
-                          {row["店名・施設名"] || row["取引先"] || "取引先不明"}
-                        </div>
-                        <div style={{ fontSize: "11px", color: "#666666", marginTop: "2px" }}>
-                          【取引方法】{row["取引方法"]}
-                        </div>
-                      </div>
+                      <TransactionCard
+                        key={idx}
+                        index={idx + 1}
+                        date={row["取引日時"] || row["取引日"] || "日付なし"}
+                        amount={row["金額（円）"] || row["出金金額（円）"] || "0"}
+                        title={row["店名・施設名"] || row["取引先"] || "取引先不明"}
+                        subInfo={`【取引方法】${row["取引方法"] || "-"}`}
+                      />
                     ))
                   )}
                 </div>
