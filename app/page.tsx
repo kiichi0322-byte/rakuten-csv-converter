@@ -432,7 +432,7 @@ export default function MainApp() {
       {activeTab === "rakuten" && (
         <div>
           <header style={{ textAlign: "center", marginBottom: "16px" }}>
-            <h1 style={{ fontSize: "18px", margin: 0, color: "#1a1a1a" }}>💳 楽天カード明細 変換</h1>
+            <h1 style={{ fontSize: "18px", margin: 0, color: "#1a1a1a" }}>💳 楽天カード明細仕訳アプリ for MoneyForward</h1>
           </header>
 
           <div style={{
@@ -563,7 +563,7 @@ export default function MainApp() {
       {activeTab === "paypay" && (
         <div>
           <header style={{ textAlign: "center", marginBottom: "16px" }}>
-            <h1 style={{ fontSize: "18px", margin: 0, color: "#1a1a1a" }}>📱 PayPay明細 自動仕分け</h1>
+            <h1 style={{ fontSize: "18px", margin: 0, color: "#1a1a1a" }}>📱 PayPay明細仕訳アプリ for MoneyForward</h1>
           </header>
 
           <div style={{
