@@ -4,7 +4,10 @@ import React, { useState } from "react";
 import Papa from "papaparse";
 import Encoding from "encoding-japanese";
 
-const OUTPUT_HEADERS = [
+// ----------------------------------------------------------------------
+// 共通定数
+// ----------------------------------------------------------------------
+const RAKUTEN_OUTPUT_HEADERS = [
   "取引日",
   "出金金額（円）",
   "入金金額（円）",
@@ -20,7 +23,10 @@ const OUTPUT_HEADERS = [
   "取引番号",
 ];
 
-interface LogState {
+// ----------------------------------------------------------------------
+// 型定義
+// ----------------------------------------------------------------------
+interface RakutenLogState {
   totalInputRows: number;
   convertedRows: number;
   excludedRows: number;
@@ -29,21 +35,35 @@ interface LogState {
   convertedData: Record<string, string>[];
 }
 
-export default function RakutenConverter() {
-  const [logs, setLogs] = useState<LogState | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string>("");
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+interface PayPayReportState {
+  totalRows: number;
+  excludedPoints: number;
+  creditCount: number;
+  paypayBalanceCount: number;
+  othersCount: number;
+  isCountOk: boolean;
+  hasOthers: boolean;
+}
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+export default function MainApp() {
+  const [activeTab, setActiveTab] = useState<"rakuten" | "paypay">("rakuten");
+
+  // ----------------------------------------------------------------------
+  // 楽天カード変換 State & Handlers
+  // ----------------------------------------------------------------------
+  const [rakutenLogs, setRakutenLogs] = useState<RakutenLogState | null>(null);
+  const [rakutenError, setRakutenError] = useState<string>("");
+  const [rakutenProcessing, setRakutenProcessing] = useState<boolean>(false);
+
+  const handleRakutenUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setIsProcessing(true);
-    setErrorMsg("");
-    setLogs(null);
+    setRakutenProcessing(true);
+    setRakutenError("");
+    setRakutenLogs(null);
 
     const reader = new FileReader();
-
     reader.onload = (event) => {
       try {
         const buffer = event.target?.result as ArrayBuffer;
@@ -61,28 +81,26 @@ export default function RakutenConverter() {
           header: true,
           skipEmptyLines: true,
           complete: (results) => {
-            processCsvData(results.data, file.name);
+            processRakutenCsv(results.data, file.name);
           },
           error: (err: Error) => {
-            setErrorMsg(`CSVパースエラー: ${err.message}`);
-            setIsProcessing(false);
+            setRakutenError(`CSVパースエラー: ${err.message}`);
+            setRakutenProcessing(false);
           },
         });
       } catch (err) {
-        setErrorMsg("ファイルの読み込み中にエラーが発生しました。");
-        setIsProcessing(false);
+        setRakutenError("ファイルの読み込み中にエラーが発生しました。");
+        setRakutenProcessing(false);
       }
     };
-
     reader.readAsArrayBuffer(file);
   };
 
-  const processCsvData = (rawData: Record<string, string>[], fileName: string) => {
+  const processRakutenCsv = (rawData: Record<string, string>[], fileName: string) => {
     const totalInputRows = rawData.length;
-
     if (totalInputRows === 0) {
-      setErrorMsg("CSVファイルが空です。");
-      setIsProcessing(false);
+      setRakutenError("CSVファイルが空です。");
+      setRakutenProcessing(false);
       return;
     }
 
@@ -91,8 +109,8 @@ export default function RakutenConverter() {
     const missingColumns = requiredColumns.filter((c) => !firstRowKeys.includes(c));
 
     if (missingColumns.length > 0) {
-      setErrorMsg(`必要なカラムが含まれていません: ${missingColumns.join(", ")}`);
-      setIsProcessing(false);
+      setRakutenError(`必要なカラムが含まれていません: ${missingColumns.join(", ")}`);
+      setRakutenProcessing(false);
       return;
     }
 
@@ -103,7 +121,6 @@ export default function RakutenConverter() {
 
     const excludedRows = totalInputRows - validRows.length;
     const convertedRows = validRows.length;
-
     const convertedData: Record<string, string>[] = [];
     let targetMonth: number | null = null;
 
@@ -163,7 +180,7 @@ export default function RakutenConverter() {
       ? `楽天カード${targetMonth}月分_MoneyForward取込用.csv`
       : "楽天カード_MoneyForward取込用.csv";
 
-    setLogs({
+    setRakutenLogs({
       totalInputRows,
       convertedRows,
       excludedRows,
@@ -171,142 +188,395 @@ export default function RakutenConverter() {
       isMatch: totalInputRows === convertedRows + excludedRows,
       convertedData,
     });
-
-    setIsProcessing(false);
+    setRakutenProcessing(false);
   };
 
-  const handleManualDownload = () => {
-    if (!logs) return;
-
-    const csvString = Papa.unparse(logs.convertedData, {
-      columns: OUTPUT_HEADERS,
+  const handleRakutenDownload = () => {
+    if (!rakutenLogs) return;
+    const csvString = Papa.unparse(rakutenLogs.convertedData, {
+      columns: RAKUTEN_OUTPUT_HEADERS,
       newline: "\r\n",
     });
-
     const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
     const blob = new Blob([bom, csvString], { type: "text/csv;charset=utf-8;" });
 
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", logs.outputFilename);
+    link.setAttribute("download", rakutenLogs.outputFilename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  return (
-    <main style={{ width: "100%", maxWidth: "100vw", boxSizing: "border-box", margin: "0 auto", padding: "20px 16px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: "#1a1a1a", backgroundColor: "#f8f9fa", minHeight: "100vh", overflowX: "hidden" }}>
-      <header style={{ textAlign: "center", marginBottom: "20px", width: "100%" }}>
-        <h1 style={{ fontSize: "20px", margin: 0, color: "#1a1a1a" }}>💳 楽天カード明細 変換</h1>
-      </header>
+  // ----------------------------------------------------------------------
+  // PayPay仕分け State & Handlers
+  // ----------------------------------------------------------------------
+  const [paypayReport, setPaypayReport] = useState<PayPayReportState | null>(null);
+  const [paypayError, setPaypayError] = useState<string>("");
+  const [paypayProcessing, setPaypayProcessing] = useState<boolean>(false);
 
-      <div style={{
-        border: "2px dashed #0066cc",
-        borderRadius: "12px",
-        padding: "20px 12px",
-        textAlign: "center",
-        backgroundColor: "#ffffff",
-        marginBottom: "20px",
-        boxSizing: "border-box",
-        width: "100%",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
-      }}>
-        <label htmlFor="file-upload" style={{
-          display: "inline-block",
-          backgroundColor: "#0066cc",
-          color: "#ffffff",
-          padding: "12px 20px",
-          borderRadius: "8px",
-          fontWeight: "bold",
-          fontSize: "14px",
-          cursor: "pointer",
-          width: "100%",
-          maxWidth: "280px",
-          boxSizing: "border-box"
-        }}>
-          📁 CSVファイルを選択
-        </label>
-        <input
-          id="file-upload"
-          type="file"
-          accept=".csv"
-          onChange={handleFileUpload}
-          disabled={isProcessing}
-          style={{ display: "none" }}
-        />
-        <p style={{ fontSize: "11px", color: "#666666", marginTop: "10px", marginBottom: 0 }}>
-          タップして明細CSVを選択してください
-        </p>
-        {isProcessing && <p style={{ marginTop: "10px", color: "#0066cc", fontWeight: "bold" }}>⏳ 処理中...</p>}
+  const handlePaypayUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setPaypayProcessing(true);
+    setPaypayError("");
+    setPaypayReport(null);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const buffer = event.target?.result as ArrayBuffer;
+        if (!buffer) return;
+
+        const uint8Array = new Uint8Array(buffer);
+        const detectedEncoding = Encoding.detect(uint8Array);
+        const unicodeString = Encoding.convert(uint8Array, {
+          to: "UNICODE",
+          from: detectedEncoding || "AUTO",
+          type: "string",
+        });
+
+        Papa.parse<Record<string, string>>(unicodeString, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            processPayPayData(results.data);
+          },
+          error: (err: Error) => {
+            setPaypayError(`CSVパースエラー: ${err.message}`);
+            setPaypayProcessing(false);
+          },
+        });
+      } catch (err) {
+        setPaypayError("ファイルの読み込み中にエラーが発生しました。");
+        setPaypayProcessing(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const processPayPayData = (df: Record<string, string>[]) => {
+    const totalRows = df.length;
+    if (totalRows === 0) {
+      setPaypayError("CSVファイルが空です。");
+      setPaypayProcessing(false);
+      return;
+    }
+
+    const firstRowKeys = Object.keys(df[0] || {});
+    if (!firstRowKeys.includes("取引方法")) {
+      setPaypayError("必要なカラム「取引方法」が含まれていません。");
+      setPaypayProcessing(false);
+      return;
+    }
+
+    const dfFiltered = df.filter((row) => (row["取引方法"] || "").trim() !== "PayPayポイント");
+    const excludedPoints = totalRows - dfFiltered.length;
+
+    const creditTargets = ["クレジット VISA 6099", "PayPayカード VISA 6099"];
+    const dfCredit = dfFiltered.filter((row) =>
+      creditTargets.includes((row["取引方法"] || "").trim())
+    );
+
+    const dfPaypayBalance = dfFiltered.filter(
+      (row) => (row["取引方法"] || "").trim() === "PayPay残高"
+    );
+
+    const dfOthers = dfFiltered.filter((row) => {
+      const method = (row["取引方法"] || "").trim();
+      return !creditTargets.includes(method) && method !== "PayPay残高";
+    });
+
+    const processedSum = excludedPoints + dfCredit.length + dfPaypayBalance.length + dfOthers.length;
+    const isCountOk = totalRows === processedSum;
+    const hasOthers = dfOthers.length > 0;
+
+    const downloadCsv = (data: Record<string, string>[], filename: string) => {
+      if (data.length === 0) return;
+      const csvString = Papa.unparse(data, { newline: "\r\n" });
+      const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+      const blob = new Blob([bom, csvString], { type: "text/csv;charset=utf-8;" });
+
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+
+    downloadCsv(dfCredit, "credit_visa_6099.csv");
+    downloadCsv(dfPaypayBalance, "paypay_zandaka.csv");
+    downloadCsv(dfOthers, "check_others.csv");
+
+    setPaypayReport({
+      totalRows,
+      excludedPoints,
+      creditCount: dfCredit.length,
+      paypayBalanceCount: dfPaypayBalance.length,
+      othersCount: dfOthers.length,
+      isCountOk,
+      hasOthers,
+    });
+    setPaypayProcessing(false);
+  };
+
+  // ----------------------------------------------------------------------
+  // レンダリング
+  // ----------------------------------------------------------------------
+  return (
+    <main style={{ width: "100%", maxWidth: "100vw", boxSizing: "border-box", margin: "0 auto", padding: "16px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: "#1a1a1a", backgroundColor: "#f8f9fa", minHeight: "100vh", overflowX: "hidden" }}>
+      
+      {/* メニュータブ */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "20px", backgroundColor: "#e9ecef", padding: "4px", borderRadius: "10px" }}>
+        <button
+          onClick={() => setActiveTab("rakuten")}
+          style={{
+            flex: 1,
+            padding: "10px 4px",
+            fontSize: "13px",
+            fontWeight: "bold",
+            borderRadius: "8px",
+            border: "none",
+            cursor: "pointer",
+            backgroundColor: activeTab === "rakuten" ? "#ffffff" : "transparent",
+            color: activeTab === "rakuten" ? "#0066cc" : "#666666",
+            boxShadow: activeTab === "rakuten" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+            transition: "all 0.2s"
+          }}
+        >
+          💳 楽天カード変換
+        </button>
+        <button
+          onClick={() => setActiveTab("paypay")}
+          style={{
+            flex: 1,
+            padding: "10px 4px",
+            fontSize: "13px",
+            fontWeight: "bold",
+            borderRadius: "8px",
+            border: "none",
+            cursor: "pointer",
+            backgroundColor: activeTab === "paypay" ? "#ffffff" : "transparent",
+            color: activeTab === "paypay" ? "#ff0033" : "#666666",
+            boxShadow: activeTab === "paypay" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+            transition: "all 0.2s"
+          }}
+        >
+          📱 PayPay仕分け
+        </button>
       </div>
 
-      {errorMsg && (
-        <div style={{ backgroundColor: "#ffebee", color: "#c62828", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "13px", boxSizing: "border-box" }}>
-          ❌ {errorMsg}
-        </div>
-      )}
+      {/* 💳 楽天カード画面 */}
+      {activeTab === "rakuten" && (
+        <div>
+          <header style={{ textAlign: "center", marginBottom: "16px" }}>
+            <h1 style={{ fontSize: "18px", margin: 0, color: "#1a1a1a" }}>💳 楽天カード明細 変換</h1>
+          </header>
 
-      {logs && (
-        <div style={{ border: "1px solid #e0e0e0", borderRadius: "12px", padding: "16px", backgroundColor: "#ffffff", boxSizing: "border-box", width: "100%", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
-          <h2 style={{ fontSize: "16px", marginTop: 0, marginBottom: "12px", borderBottom: "1px solid #eee", paddingBottom: "8px", color: "#1a1a1a" }}>📊 処理完了レポート</h2>
-          
-          <div style={{ display: "flex", gap: "8px", marginBottom: "12px", width: "100%", boxSizing: "border-box" }}>
-            <div style={{ flex: 1, backgroundColor: "#f5f5f5", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
-              <div style={{ fontSize: "10px", color: "#666666" }}>入力件数</div>
-              <div style={{ fontWeight: "bold", fontSize: "15px", color: "#1a1a1a" }}>{logs.totalInputRows}件</div>
-            </div>
-            <div style={{ flex: 1, backgroundColor: "#e8f5e9", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
-              <div style={{ fontSize: "10px", color: "#2e7d32" }}>変換成功</div>
-              <div style={{ fontWeight: "bold", fontSize: "15px", color: "#2e7d32" }}>{logs.convertedRows}件</div>
-            </div>
-          </div>
-
-          <p style={{ fontSize: "12px", color: "#444444", margin: "6px 0", wordBreak: "break-all" }}>
-            📄 <strong>保存名:</strong><br />{logs.outputFilename}
-          </p>
-
-          {logs.excludedRows > 0 && (
-            <p style={{ fontSize: "11px", color: "#e65100", backgroundColor: "#fff3e0", padding: "8px", borderRadius: "6px", margin: "8px 0" }}>
-              ℹ️ ETC乗降区間など利用日なし {logs.excludedRows} 件を自動除外しました
-            </p>
-          )}
-
-          <button
-            onClick={handleManualDownload}
-            style={{
-              width: "100%",
-              backgroundColor: "#2e7d32",
+          <div style={{
+            border: "2px dashed #0066cc",
+            borderRadius: "12px",
+            padding: "20px 12px",
+            textAlign: "center",
+            backgroundColor: "#ffffff",
+            marginBottom: "20px",
+            boxSizing: "border-box",
+            width: "100%",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+          }}>
+            <label htmlFor="rakuten-file" style={{
+              display: "inline-block",
+              backgroundColor: "#0066cc",
               color: "#ffffff",
-              border: "none",
-              padding: "16px",
+              padding: "12px 20px",
               borderRadius: "8px",
               fontWeight: "bold",
-              fontSize: "16px",
+              fontSize: "14px",
               cursor: "pointer",
-              margin: "16px 0",
-              boxShadow: "0 4px 6px rgba(46,125,50,0.2)"
-            }}
-          >
-            📥 変換後CSVを保存する
-          </button>
-
-          <h3 style={{ fontSize: "14px", marginTop: "16px", marginBottom: "8px", color: "#1a1a1a" }}>
-            ▼ プレビュー (全 {logs.convertedData.length} 件)
-          </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%", maxHeight: "350px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", boxSizing: "border-box", backgroundColor: "#ffffff" }}>
-            {logs.convertedData.map((row, idx) => (
-              <div key={idx} style={{ border: "1px solid #e0e0e0", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px", boxSizing: "border-box", width: "100%" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                  <span style={{ color: "#666666", fontSize: "11px" }}>#{idx + 1} | {row["取引日"]}</span>
-                  <span style={{ fontWeight: "bold", color: "#d32f2f", fontSize: "13px" }}>￥{row["出金金額（円）"]}</span>
-                </div>
-                <div style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "12px", wordBreak: "break-all" }}>{row["取引先"]}</div>
-              </div>
-            ))}
+              width: "100%",
+              maxWidth: "280px",
+              boxSizing: "border-box"
+            }}>
+              📁 CSVファイルを選択
+            </label>
+            <input
+              id="rakuten-file"
+              type="file"
+              accept=".csv"
+              onChange={handleRakutenUpload}
+              disabled={rakutenProcessing}
+              style={{ display: "none" }}
+            />
+            <p style={{ fontSize: "11px", color: "#666666", marginTop: "10px", marginBottom: 0 }}>
+              タップして楽天カード明細CSVを選択してください
+            </p>
+            {rakutenProcessing && <p style={{ marginTop: "10px", color: "#0066cc", fontWeight: "bold" }}>⏳ 処理中...</p>}
           </div>
+
+          {rakutenError && (
+            <div style={{ backgroundColor: "#ffebee", color: "#c62828", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "13px" }}>
+              ❌ {rakutenError}
+            </div>
+          )}
+
+          {rakutenLogs && (
+            <div style={{ border: "1px solid #e0e0e0", borderRadius: "12px", padding: "16px", backgroundColor: "#ffffff", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
+              <h2 style={{ fontSize: "15px", marginTop: 0, marginBottom: "12px", borderBottom: "1px solid #eee", paddingBottom: "8px", color: "#1a1a1a" }}>📊 処理完了レポート</h2>
+              
+              <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+                <div style={{ flex: 1, backgroundColor: "#f5f5f5", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
+                  <div style={{ fontSize: "10px", color: "#666666" }}>入力件数</div>
+                  <div style={{ fontWeight: "bold", fontSize: "15px", color: "#1a1a1a" }}>{rakutenLogs.totalInputRows}件</div>
+                </div>
+                <div style={{ flex: 1, backgroundColor: "#e8f5e9", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
+                  <div style={{ fontSize: "10px", color: "#2e7d32" }}>変換成功</div>
+                  <div style={{ fontWeight: "bold", fontSize: "15px", color: "#2e7d32" }}>{rakutenLogs.convertedRows}件</div>
+                </div>
+              </div>
+
+              <p style={{ fontSize: "12px", color: "#444444", margin: "6px 0", wordBreak: "break-all" }}>
+                📄 <strong>保存名:</strong><br />{rakutenLogs.outputFilename}
+              </p>
+
+              {rakutenLogs.excludedRows > 0 && (
+                <p style={{ fontSize: "11px", color: "#e65100", backgroundColor: "#fff3e0", padding: "8px", borderRadius: "6px", margin: "8px 0" }}>
+                  ℹ️ ETC乗降区間など利用日なし {rakutenLogs.excludedRows} 件を自動除外しました
+                </p>
+              )}
+
+              <button
+                onClick={handleRakutenDownload}
+                style={{
+                  width: "100%",
+                  backgroundColor: "#2e7d32",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "16px",
+                  borderRadius: "8px",
+                  fontWeight: "bold",
+                  fontSize: "15px",
+                  cursor: "pointer",
+                  margin: "16px 0",
+                  boxShadow: "0 4px 6px rgba(46,125,50,0.2)"
+                }}
+              >
+                📥 変換後CSVを保存する
+              </button>
+
+              <h3 style={{ fontSize: "13px", marginTop: "16px", marginBottom: "8px", color: "#1a1a1a" }}>
+                ▼ プレビュー (全 {rakutenLogs.convertedData.length} 件)
+              </h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "350px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", backgroundColor: "#ffffff" }}>
+                {rakutenLogs.convertedData.map((row, idx) => (
+                  <div key={idx} style={{ border: "1px solid #e0e0e0", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                      <span style={{ color: "#666666", fontSize: "11px" }}>#{idx + 1} | {row["取引日"]}</span>
+                      <span style={{ fontWeight: "bold", color: "#d32f2f", fontSize: "13px" }}>￥{row["出金金額（円）"]}</span>
+                    </div>
+                    <div style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "12px", wordBreak: "break-all" }}>{row["取引先"]}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* 📱 PayPay画面 */}
+      {activeTab === "paypay" && (
+        <div>
+          <header style={{ textAlign: "center", marginBottom: "16px" }}>
+            <h1 style={{ fontSize: "18px", margin: 0, color: "#1a1a1a" }}>📱 PayPay明細 自動仕分け</h1>
+          </header>
+
+          <div style={{
+            border: "2px dashed #ff0033",
+            borderRadius: "12px",
+            padding: "20px 12px",
+            textAlign: "center",
+            backgroundColor: "#ffffff",
+            marginBottom: "20px",
+            boxSizing: "border-box",
+            width: "100%",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+          }}>
+            <label htmlFor="paypay-file" style={{
+              display: "inline-block",
+              backgroundColor: "#ff0033",
+              color: "#ffffff",
+              padding: "12px 20px",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              fontSize: "14px",
+              cursor: "pointer",
+              width: "100%",
+              maxWidth: "280px",
+              boxSizing: "border-box"
+            }}>
+              📁 CSVファイルを選択
+            </label>
+            <input
+              id="paypay-file"
+              type="file"
+              accept=".csv"
+              onChange={handlePaypayUpload}
+              disabled={paypayProcessing}
+              style={{ display: "none" }}
+            />
+            <p style={{ fontSize: "11px", color: "#666666", marginTop: "10px", marginBottom: 0 }}>
+              タップしてPayPay明細CSVを選択してください
+            </p>
+            {paypayProcessing && <p style={{ marginTop: "10px", color: "#ff0033", fontWeight: "bold" }}>⏳ 処理中...</p>}
+          </div>
+
+          {paypayError && (
+            <div style={{ backgroundColor: "#ffebee", color: "#c62828", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "13px" }}>
+              ❌ {paypayError}
+            </div>
+          )}
+
+          {paypayReport && (
+            <div style={{ border: "1px solid #e0e0e0", borderRadius: "12px", padding: "16px", backgroundColor: "#ffffff", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
+              <h2 style={{ fontSize: "15px", marginTop: 0, marginBottom: "12px", borderBottom: "1px solid #eee", paddingBottom: "8px", color: "#1a1a1a" }}>📊 処理結果サマリー</h2>
+              
+              <div style={{ fontSize: "13px", lineHeight: "1.8", color: "#333333", marginBottom: "16px" }}>
+                <div>📥 <strong>入力データ総数:</strong> {paypayReport.totalRows} 件</div>
+                <div style={{ paddingLeft: "8px", borderLeft: "3px solid #ddd", margin: "8px 0" }}>
+                  <div>1️⃣ 除外 (ポイント) : {paypayReport.excludedPoints} 件</div>
+                  <div>2️⃣ クレジット抽出 : {paypayReport.creditCount} 件 ➔ <code>credit_visa_6099.csv</code></div>
+                  <div>3️⃣ 残高払い抽出 : {paypayReport.paypayBalanceCount} 件 ➔ <code>paypay_zandaka.csv</code></div>
+                  <div>4️⃣ 未分類 (その他) : {paypayReport.othersCount} 件 {paypayReport.hasOthers && <span>➔ <code>check_others.csv</code></span>}</div>
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: "#f9f9f9", borderRadius: "8px", padding: "12px", marginBottom: "16px" }}>
+                <div style={{ fontWeight: "bold", fontSize: "12px", marginBottom: "6px" }}>【診断結果】</div>
+                <div style={{ fontSize: "12px", color: paypayReport.isCountOk ? "#2e7d32" : "#c62828", margin: "2px 0" }}>
+                  {paypayReport.isCountOk
+                    ? "✅ データの漏れはありません（件数一致）"
+                    : `❌ 警告：件数が一致しません`}
+                </div>
+                <div style={{ fontSize: "12px", color: !paypayReport.hasOthers ? "#2e7d32" : "#ef6c00", margin: "2px 0" }}>
+                  {!paypayReport.hasOthers
+                    ? "✅ 全てのデータが正しく分類されました"
+                    : `⚠️ 注意：未分類のデータが ${paypayReport.othersCount} 件あります`}
+                </div>
+              </div>
+
+              <div style={{ textAlign: "center", padding: "10px", borderRadius: "8px", backgroundColor: paypayReport.isCountOk && !paypayReport.hasOthers ? "#e8f5e9" : "#fff3e0", color: paypayReport.isCountOk && !paypayReport.hasOthers ? "#2e7d32" : "#e65100", fontWeight: "bold", fontSize: "13px" }}>
+                {paypayReport.isCountOk && !paypayReport.hasOthers
+                  ? "🎉 すべて正常に処理完了しました！"
+                  : "🧐 処理は完了しましたが、上記の警告を確認してください。"}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
     </main>
   );
 }
