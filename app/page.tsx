@@ -198,12 +198,7 @@ export default function RakutenConverter() {
   return (
     <main style={{ width: "100%", maxWidth: "100vw", boxSizing: "border-box", margin: "0 auto", padding: "20px 16px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: "#1a1a1a", backgroundColor: "#f8f9fa", minHeight: "100vh", overflowX: "hidden" }}>
       <header style={{ textAlign: "center", marginBottom: "20px", width: "100%" }}>
-        <h1 style={{ fontSize: "20px", margin: "0 0 8px 0", color: "#1a1a1a" }}>💳 楽天カード明細 変換</h1>
-        <p style={{ fontSize: "12px", color: "#555555", lineHeight: "1.5", margin: 0 }}>
-          楽天カードCSVをMoneyForward取込用（半額変換）に自動整形します。
-          <br />
-          <span style={{ color: "#2e7d32", fontWeight: "bold" }}>🔒 個人情報はサーバーに送信されません</span>
-        </p>
+        <h1 style={{ fontSize: "20px", margin: 0, color: "#1a1a1a" }}>💳 楽天カード明細 変換</h1>
       </header>
 
       <div style={{
@@ -277,7 +272,6 @@ export default function RakutenConverter() {
             </p>
           )}
 
-          {/* メインのダウンロードボタン */}
           <button
             onClick={handleManualDownload}
             style={{
@@ -290,22 +284,12 @@ export default function RakutenConverter() {
               fontWeight: "bold",
               fontSize: "16px",
               cursor: "pointer",
-              margin: "16px 0 8px 0",
+              margin: "16px 0",
               boxShadow: "0 4px 6px rgba(46,125,50,0.2)"
             }}
           >
             📥 変換後CSVを保存する
           </button>
-
-          {/* iPhone / スマホ用ステップガイド */}
-          <div style={{ backgroundColor: "#f0f7ff", border: "1px solid #cce5ff", borderRadius: "8px", padding: "12px", marginTop: "8px", fontSize: "12px", color: "#004085" }}>
-            <strong style={{ display: "block", marginBottom: "4px" }}>💡 マネーフォワードへの取り込み手順:</strong>
-            <ol style={{ margin: 0, paddingLeft: "18px", lineHeight: "1.6" }}>
-              <li>上の緑色ボタンでCSVを保存</li>
-              <li>Safari下部の<strong>「ダウンロード通知 (↓)」</strong>をタップ</li>
-              <li>ファイル横の<strong>「共有ボタン (□に↑)」</strong> ➔ <strong>マネーフォワード</strong>を選択</li>
-            </ol>
-          </div>
 
           <h3 style={{ fontSize: "14px", marginTop: "16px", marginBottom: "8px", color: "#1a1a1a" }}>
             ▼ プレビュー (全 {logs.convertedData.length} 件)
