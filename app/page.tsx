@@ -215,7 +215,7 @@ export default function MainApp() {
   const [paypayReport, setPaypayReport] = useState<PayPayReportState | null>(null);
   const [paypayError, setPaypayError] = useState<string>("");
   const [paypayProcessing, setPaypayProcessing] = useState<boolean>(false);
-  const [paypayPreviewCategory, setPaypayPreviewCategory] = useState<"credit" | "balance" | "others">("credit");
+  const [previewTab, setPreviewTab] = useState<"credit" | "balance" | "others">("credit");
 
   const handlePaypayUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -294,11 +294,6 @@ export default function MainApp() {
     const isCountOk = totalRows === processedSum;
     const hasOthers = dfOthers.length > 0;
 
-    // 初回自動ダウンロード
-    downloadPaypayCsv(dfCredit, "credit_visa_6099.csv");
-    downloadPaypayCsv(dfPaypayBalance, "paypay_zandaka.csv");
-    downloadPaypayCsv(dfOthers, "check_others.csv");
-
     setPaypayReport({
       totalRows,
       excludedPoints,
@@ -308,11 +303,20 @@ export default function MainApp() {
       isCountOk,
       hasOthers,
     });
+
+    if (dfCredit.length > 0) {
+      setPreviewTab("credit");
+    } else if (dfPaypayBalance.length > 0) {
+      setPreviewTab("balance");
+    } else {
+      setPreviewTab("others");
+    }
+
     setPaypayProcessing(false);
   };
 
-  const downloadPaypayCsv = (data: Record<string, string>[], filename: string) => {
-    if (data.length === 0) return;
+  const handlePaypayDownload = (data: Record<string, string>[], filename: string) => {
+    if (!data || data.length === 0) return;
     const csvString = Papa.unparse(data, { newline: "\r\n" });
     const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
     const blob = new Blob([bom, csvString], { type: "text/csv;charset=utf-8;" });
@@ -324,6 +328,13 @@ export default function MainApp() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const getActivePreviewData = () => {
+    if (!paypayReport) return [];
+    if (previewTab === "credit") return paypayReport.creditData;
+    if (previewTab === "balance") return paypayReport.paypayBalanceData;
+    return paypayReport.othersData;
   };
 
   // ----------------------------------------------------------------------
@@ -545,181 +556,172 @@ export default function MainApp() {
             <div style={{ border: "1px solid #e0e0e0", borderRadius: "12px", padding: "16px", backgroundColor: "#ffffff", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
               <h2 style={{ fontSize: "15px", marginTop: 0, marginBottom: "12px", borderBottom: "1px solid #eee", paddingBottom: "8px", color: "#1a1a1a" }}>📊 処理結果サマリー</h2>
               
-              <div style={{ fontSize: "13px", lineHeight: "1.8", color: "#333333", marginBottom: "12px" }}>
+              <div style={{ fontSize: "13px", lineHeight: "1.8", color: "#333333", marginBottom: "16px" }}>
                 <div>📥 <strong>入力データ総数:</strong> {paypayReport.totalRows} 件</div>
-                <div style={{ fontSize: "12px", color: "#666666", marginBottom: "8px" }}>
-                  🚫 除外 (ポイント) : {paypayReport.excludedPoints} 件
+                <div style={{ paddingLeft: "8px", borderLeft: "3px solid #ddd", margin: "8px 0" }}>
+                  <div>1️⃣ 除外 (ポイント) : {paypayReport.excludedPoints} 件</div>
+                  <div>2️⃣ クレジット抽出 : {paypayReport.creditData.length} 件</div>
+                  <div>3️⃣ 残高払い抽出 : {paypayReport.paypayBalanceData.length} 件</div>
+                  <div>4️⃣ 未分類 (その他) : {paypayReport.othersData.length} 件</div>
                 </div>
               </div>
 
-              {/* 個別ダウンロードボタンエリア */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
-                <button
-                  onClick={() => downloadPaypayCsv(paypayReport.creditData, "credit_visa_6099.csv")}
-                  disabled={paypayReport.creditData.length === 0}
-                  style={{
-                    display: "flex",
-                    justify: "space-between",
-                    alignItems: "center",
-                    backgroundColor: paypayReport.creditData.length > 0 ? "#0066cc" : "#e0e0e0",
-                    color: "#ffffff",
-                    border: "none",
-                    padding: "12px 14px",
-                    borderRadius: "8px",
-                    fontWeight: "bold",
-                    fontSize: "13px",
-                    cursor: paypayReport.creditData.length > 0 ? "pointer" : "default"
-                  }}
-                >
-                  <span>📥 クレジット ({paypayReport.creditData.length}件)</span>
-                  <span style={{ fontSize: "11px", opacity: 0.8 }}>credit_visa_6099.csv</span>
-                </button>
-
-                <button
-                  onClick={() => downloadPaypayCsv(paypayReport.paypayBalanceData, "paypay_zandaka.csv")}
-                  disabled={paypayReport.paypayBalanceData.length === 0}
-                  style={{
-                    display: "flex",
-                    justify: "space-between",
-                    alignItems: "center",
-                    backgroundColor: paypayReport.paypayBalanceData.length > 0 ? "#ff7f00" : "#e0e0e0",
-                    color: "#ffffff",
-                    border: "none",
-                    padding: "12px 14px",
-                    borderRadius: "8px",
-                    fontWeight: "bold",
-                    fontSize: "13px",
-                    cursor: paypayReport.paypayBalanceData.length > 0 ? "pointer" : "default"
-                  }}
-                >
-                  <span>📥 PayPay残高 ({paypayReport.paypayBalanceData.length}件)</span>
-                  <span style={{ fontSize: "11px", opacity: 0.8 }}>paypay_zandaka.csv</span>
-                </button>
-
-                <button
-                  onClick={() => downloadPaypayCsv(paypayReport.othersData, "check_others.csv")}
-                  disabled={paypayReport.othersData.length === 0}
-                  style={{
-                    display: "flex",
-                    justify: "space-between",
-                    alignItems: "center",
-                    backgroundColor: paypayReport.othersData.length > 0 ? "#d32f2f" : "#e0e0e0",
-                    color: "#ffffff",
-                    border: "none",
-                    padding: "12px 14px",
-                    borderRadius: "8px",
-                    fontWeight: "bold",
-                    fontSize: "13px",
-                    cursor: paypayReport.othersData.length > 0 ? "pointer" : "default"
-                  }}
-                >
-                  <span>📥 未分類/その他 ({paypayReport.othersData.length}件)</span>
-                  <span style={{ fontSize: "11px", opacity: 0.8 }}>check_others.csv</span>
-                </button>
-              </div>
-
               <div style={{ backgroundColor: "#f9f9f9", borderRadius: "8px", padding: "12px", marginBottom: "16px" }}>
-                <div style={{ fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>【診断結果】</div>
-                <div style={{ fontSize: "12px", color: paypayReport.isCountOk ? "#2e7d32" : "#c62828" }}>
+                <div style={{ fontWeight: "bold", fontSize: "12px", marginBottom: "6px" }}>【診断結果】</div>
+                <div style={{ fontSize: "12px", color: paypayReport.isCountOk ? "#2e7d32" : "#c62828", margin: "2px 0" }}>
                   {paypayReport.isCountOk
                     ? "✅ データの漏れはありません（件数一致）"
                     : `❌ 警告：件数が一致しません`}
                 </div>
-                <div style={{ fontSize: "12px", color: !paypayReport.hasOthers ? "#2e7d32" : "#ef6c00" }}>
+                <div style={{ fontSize: "12px", color: !paypayReport.hasOthers ? "#2e7d32" : "#ef6c00", margin: "2px 0" }}>
                   {!paypayReport.hasOthers
                     ? "✅ 全てのデータが正しく分類されました"
                     : `⚠️ 注意：未分類のデータが ${paypayReport.othersData.length} 件あります`}
                 </div>
               </div>
 
-              {/* プレビュー表示セクション */}
-              <h3 style={{ fontSize: "13px", marginTop: "16px", marginBottom: "8px", color: "#1a1a1a" }}>
-                ▼ 分類別プレビュー
-              </h3>
+              {/* 各CSV個別ダウンロードボタン */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
+                <button
+                  onClick={() => handlePaypayDownload(paypayReport.creditData, "credit_visa_6099.csv")}
+                  disabled={paypayReport.creditData.length === 0}
+                  style={{
+                    width: "100%",
+                    backgroundColor: paypayReport.creditData.length > 0 ? "#0066cc" : "#ccc",
+                    color: "#ffffff",
+                    border: "none",
+                    padding: "12px",
+                    borderRadius: "8px",
+                    fontWeight: "bold",
+                    fontSize: "14px",
+                    cursor: paypayReport.creditData.length > 0 ? "pointer" : "not-allowed"
+                  }}
+                >
+                  📥 クレジット抽出を保存 ({paypayReport.creditData.length}件)
+                </button>
 
-              {/* プレビュー切り替えサブタブ */}
-              <div style={{ display: "flex", gap: "4px", marginBottom: "8px" }}>
                 <button
-                  onClick={() => setPaypayPreviewCategory("credit")}
+                  onClick={() => handlePaypayDownload(paypayReport.paypayBalanceData, "paypay_zandaka.csv")}
+                  disabled={paypayReport.paypayBalanceData.length === 0}
                   style={{
-                    flex: 1,
-                    padding: "6px 2px",
-                    fontSize: "11px",
-                    borderRadius: "6px",
-                    border: "1px solid #ccc",
-                    backgroundColor: paypayPreviewCategory === "credit" ? "#0066cc" : "#f5f5f5",
-                    color: paypayPreviewCategory === "credit" ? "#ffffff" : "#333333",
-                    fontWeight: "bold"
+                    width: "100%",
+                    backgroundColor: paypayReport.paypayBalanceData.length > 0 ? "#ff0033" : "#ccc",
+                    color: "#ffffff",
+                    border: "none",
+                    padding: "12px",
+                    borderRadius: "8px",
+                    fontWeight: "bold",
+                    fontSize: "14px",
+                    cursor: paypayReport.paypayBalanceData.length > 0 ? "pointer" : "not-allowed"
                   }}
                 >
-                  クレジット ({paypayReport.creditData.length})
+                  📥 残高払い抽出を保存 ({paypayReport.paypayBalanceData.length}件)
                 </button>
-                <button
-                  onClick={() => setPaypayPreviewCategory("balance")}
-                  style={{
-                    flex: 1,
-                    padding: "6px 2px",
-                    fontSize: "11px",
-                    borderRadius: "6px",
-                    border: "1px solid #ccc",
-                    backgroundColor: paypayPreviewCategory === "balance" ? "#ff7f00" : "#f5f5f5",
-                    color: paypayPreviewCategory === "balance" ? "#ffffff" : "#333333",
-                    fontWeight: "bold"
-                  }}
-                >
-                  残高 ({paypayReport.paypayBalanceData.length})
-                </button>
-                <button
-                  onClick={() => setPaypayPreviewCategory("others")}
-                  style={{
-                    flex: 1,
-                    padding: "6px 2px",
-                    fontSize: "11px",
-                    borderRadius: "6px",
-                    border: "1px solid #ccc",
-                    backgroundColor: paypayPreviewCategory === "others" ? "#d32f2f" : "#f5f5f5",
-                    color: paypayPreviewCategory === "others" ? "#ffffff" : "#333333",
-                    fontWeight: "bold"
-                  }}
-                >
-                  未分類 ({paypayReport.othersData.length})
-                </button>
+
+                {paypayReport.hasOthers && (
+                  <button
+                    onClick={() => handlePaypayDownload(paypayReport.othersData, "check_others.csv")}
+                    style={{
+                      width: "100%",
+                      backgroundColor: "#e65100",
+                      color: "#ffffff",
+                      border: "none",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      fontSize: "14px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    ⚠️ 未分類(その他)を保存 ({paypayReport.othersData.length}件)
+                  </button>
+                )}
               </div>
 
-              {/* プレビューリスト */}
-              {(() => {
-                const targetData =
-                  paypayPreviewCategory === "credit"
-                    ? paypayReport.creditData
-                    : paypayPreviewCategory === "balance"
-                    ? paypayReport.paypayBalanceData
-                    : paypayReport.othersData;
+              {/* ファイル単位でのプレビュー切り替えタブ */}
+              <div style={{ marginTop: "20px", borderTop: "1px solid #eee", paddingTop: "16px" }}>
+                <h3 style={{ fontSize: "14px", marginTop: 0, marginBottom: "10px", color: "#1a1a1a" }}>
+                  ▼ 生成ファイル別 プレビュー
+                </h3>
 
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "350px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", backgroundColor: "#ffffff" }}>
-                    {targetData.length === 0 ? (
-                      <div style={{ textAlign: "center", color: "#888888", fontSize: "12px", padding: "16px 0" }}>
-                        対象のデータはありません
-                      </div>
-                    ) : (
-                      targetData.map((row, idx) => (
-                        <div key={idx} style={{ border: "1px solid #e0e0e0", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                            <span style={{ color: "#666666", fontSize: "11px" }}>#{idx + 1} | {row["取引日時"] || row["利用日"] || row["日付"] || "-"}</span>
-                            <span style={{ fontWeight: "bold", color: "#d32f2f", fontSize: "13px" }}>￥{row["金額（円）"] || row["金額"] || row["支払金額"] || "-"}</span>
-                          </div>
-                          <div style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "12px", wordBreak: "break-all" }}>
-                            {row["加盟店名/内容"] || row["取引先"] || row["内容"] || "-"}
-                          </div>
-                          <div style={{ fontSize: "10px", color: "#888888", marginTop: "2px" }}>
-                            方式: {row["取引方法"] || "-"}
-                          </div>
+                <div style={{ display: "flex", gap: "4px", marginBottom: "10px", backgroundColor: "#f0f0f0", padding: "3px", borderRadius: "8px" }}>
+                  <button
+                    onClick={() => setPreviewTab("credit")}
+                    style={{
+                      flex: 1,
+                      padding: "8px 2px",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      backgroundColor: previewTab === "credit" ? "#ffffff" : "transparent",
+                      color: previewTab === "credit" ? "#0066cc" : "#666666",
+                      boxShadow: previewTab === "credit" ? "0 1px 2px rgba(0,0,0,0.1)" : "none"
+                    }}
+                  >
+                    クレジット ({paypayReport.creditData.length})
+                  </button>
+                  <button
+                    onClick={() => setPreviewTab("balance")}
+                    style={{
+                      flex: 1,
+                      padding: "8px 2px",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      backgroundColor: previewTab === "balance" ? "#ffffff" : "transparent",
+                      color: previewTab === "balance" ? "#ff0033" : "#666666",
+                      boxShadow: previewTab === "balance" ? "0 1px 2px rgba(0,0,0,0.1)" : "none"
+                    }}
+                  >
+                    残高払い ({paypayReport.paypayBalanceData.length})
+                  </button>
+                  <button
+                    onClick={() => setPreviewTab("others")}
+                    style={{
+                      flex: 1,
+                      padding: "8px 2px",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      backgroundColor: previewTab === "others" ? "#ffffff" : "transparent",
+                      color: previewTab === "others" ? "#e65100" : "#666666",
+                      boxShadow: previewTab === "others" ? "0 1px 2px rgba(0,0,0,0.1)" : "none"
+                    }}
+                  >
+                    未分類 ({paypayReport.othersData.length})
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "300px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", backgroundColor: "#ffffff" }}>
+                  {getActivePreviewData().length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "20px", color: "#999999", fontSize: "12px" }}>
+                      該当するデータはありません
+                    </div>
+                  ) : (
+                    getActivePreviewData().map((row, idx) => (
+                      <div key={idx} style={{ border: "1px solid #e0e0e0", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                          <span style={{ color: "#666666", fontSize: "11px" }}>#{idx + 1} | {row["取引日時"] || row["取引日"] || "日付なし"}</span>
+                          <span style={{ fontWeight: "bold", color: "#d32f2f", fontSize: "13px" }}>￥{row["金額（円）"] || row["出金金額（円）"] || "0"}</span>
                         </div>
-                      ))
-                    )}
-                  </div>
-                );
-              })()}
+                        <div style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "12px", wordBreak: "break-all" }}>
+                          {row["店名・施設名"] || row["取引先"] || "取引先不明"}
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#666666", marginTop: "2px" }}>
+                          【取引方法】{row["取引方法"]}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
             </div>
           )}
         </div>
