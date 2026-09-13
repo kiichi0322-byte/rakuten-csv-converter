@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import Papa from "papaparse";
 import Encoding from "encoding-japanese";
 
-// 出力するCSVのヘッダー定義
 const OUTPUT_HEADERS = [
   "取引日",
   "出金金額（円）",
@@ -35,7 +34,6 @@ export default function RakutenConverter() {
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
-  // ファイル読み込み & 変換処理
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -51,7 +49,6 @@ export default function RakutenConverter() {
         const buffer = event.target?.result as ArrayBuffer;
         if (!buffer) return;
 
-        // 1. 文字コードの自動判別 & UTF-8文字列への変換
         const uint8Array = new Uint8Array(buffer);
         const detectedEncoding = Encoding.detect(uint8Array);
         const unicodeString = Encoding.convert(uint8Array, {
@@ -60,7 +57,6 @@ export default function RakutenConverter() {
           type: "string",
         });
 
-        // 2. CSVパース
         Papa.parse<Record<string, string>>(unicodeString, {
           header: true,
           skipEmptyLines: true,
@@ -81,7 +77,6 @@ export default function RakutenConverter() {
     reader.readAsArrayBuffer(file);
   };
 
-  // データ変換コアロジック
   const processCsvData = (rawData: Record<string, string>[], fileName: string) => {
     const totalInputRows = rawData.length;
 
@@ -91,7 +86,6 @@ export default function RakutenConverter() {
       return;
     }
 
-    // 必須カラムチェック
     const firstRowKeys = Object.keys(rawData[0] || {});
     const requiredColumns = ["利用日", "利用店名・商品名", "支払総額"];
     const missingColumns = requiredColumns.filter((c) => !firstRowKeys.includes(c));
@@ -102,7 +96,6 @@ export default function RakutenConverter() {
       return;
     }
 
-    // 1. 無効行（利用日がない行）の除外
     const validRows = rawData.filter((row) => {
       const dateStr = row["利用日"]?.trim();
       return dateStr && !isNaN(Date.parse(dateStr.replace(/\//g, "-")));
@@ -111,7 +104,6 @@ export default function RakutenConverter() {
     const excludedRows = totalInputRows - validRows.length;
     const convertedRows = validRows.length;
 
-    // 2. 各フィールドの生成
     const convertedData: Record<string, string>[] = [];
     let targetMonth: number | null = null;
 
@@ -119,12 +111,10 @@ export default function RakutenConverter() {
       const rawDateStr = row["利用日"]?.trim();
       const dateObj = new Date(rawDateStr.replace(/\//g, "-"));
 
-      // 月の取得
       if (targetMonth === null && !isNaN(dateObj.getTime())) {
         targetMonth = dateObj.getMonth() + 1;
       }
 
-      // 取引日 (一意の時刻付与)
       const secOffset = index + 1;
       const hh = String(Math.floor(secOffset / 3600) % 24).padStart(2, "0");
       const mm = String(Math.floor((secOffset % 3600) / 60)).padStart(2, "0");
@@ -135,7 +125,6 @@ export default function RakutenConverter() {
       const day = String(dateObj.getDate()).padStart(2, "0");
       const dateFormatted = `${year}/${month}/${day} ${hh}:${mm}:${ss}`;
 
-      // 出金金額（円）
       const rawAmountStr = (row["支払総額"] || "0").replace(/,/g, "");
       const rawAmount = parseFloat(rawAmountStr) || 0;
       const amountHalfRound = Math.round(rawAmount / 2);
@@ -144,7 +133,6 @@ export default function RakutenConverter() {
           ? amountHalfRound.toLocaleString("ja-JP")
           : String(amountHalfRound);
 
-      // 取引番号
       const ymdStr = `${year}${month}${day}`;
       const sequenceStr = String(index + 1).padStart(8, "0");
       const transactionId = `9000${ymdStr}${sequenceStr}`;
@@ -166,7 +154,6 @@ export default function RakutenConverter() {
       });
     });
 
-    // 出力ファイル名生成
     const monthMatch = fileName.match(/(\d{1,2})月/) || fileName.match(/\d{4}(\d{2})/);
     if (monthMatch) {
       targetMonth = parseInt(monthMatch[1], 10);
@@ -187,11 +174,9 @@ export default function RakutenConverter() {
 
     setIsProcessing(false);
 
-    // 3. 自動ダウンロード実行
     downloadCsv(convertedData, outputFilename);
   };
 
-  // CSVダウンロード処理 (BOM付き UTF-8)
   const downloadCsv = (data: Record<string, string>[], filename: string) => {
     const csvString = Papa.unparse(data, {
       columns: OUTPUT_HEADERS,
@@ -211,36 +196,38 @@ export default function RakutenConverter() {
   };
 
   return (
-    <main style={{ maxWidth: "600px", margin: "20px auto", padding: "0 16px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: "#333" }}>
-      {/* ヘッダー */}
-      <header style={{ textAlign: "center", marginBottom: "24px" }}>
-        <h1 style={{ fontSize: "22px", margin: "0 0 8px 0" }}>💳 楽天カード明細 変換</h1>
-        <p style={{ fontSize: "13px", color: "#666", lineHeight: "1.5", margin: 0 }}>
+    <main style={{ width: "100%", maxWidth: "100vw", boxSizing: "border-box", margin: "0 auto", padding: "20px 16px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: "#333", overflowX: "hidden" }}>
+      <header style={{ textAlign: "center", marginBottom: "20px", width: "100%" }}>
+        <h1 style={{ fontSize: "20px", margin: "0 0 8px 0" }}>💳 楽天カード明細 変換</h1>
+        <p style={{ fontSize: "12px", color: "#666", lineHeight: "1.5", margin: 0 }}>
           楽天カードCSVをMoneyForward取込用（半額変換）に自動整形します。
           <br />
           <span style={{ color: "#2e7d32", fontWeight: "bold" }}>🔒 個人情報はサーバーに送信されません</span>
         </p>
       </header>
 
-      {/* ファイル選択カード */}
       <div style={{
         border: "2px dashed #0066cc",
         borderRadius: "12px",
-        padding: "24px 16px",
+        padding: "20px 12px",
         textAlign: "center",
         backgroundColor: "#f4f8ff",
-        marginBottom: "20px"
+        marginBottom: "20px",
+        boxSizing: "border-box",
+        width: "100%"
       }}>
         <label htmlFor="file-upload" style={{
           display: "inline-block",
           backgroundColor: "#0066cc",
           color: "#fff",
-          padding: "12px 24px",
+          padding: "12px 20px",
           borderRadius: "8px",
           fontWeight: "bold",
-          fontSize: "15px",
+          fontSize: "14px",
           cursor: "pointer",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+          width: "100%",
+          maxWidth: "280px",
+          boxSizing: "border-box"
         }}>
           📁 CSVファイルを選択
         </label>
@@ -252,60 +239,57 @@ export default function RakutenConverter() {
           disabled={isProcessing}
           style={{ display: "none" }}
         />
-        <p style={{ fontSize: "12px", color: "#666", marginTop: "10px", marginBottom: 0 }}>
+        <p style={{ fontSize: "11px", color: "#666", marginTop: "10px", marginBottom: 0 }}>
           タップして明細CSVを選択してください
         </p>
         {isProcessing && <p style={{ marginTop: "10px", color: "#0066cc", fontWeight: "bold" }}>⏳ 処理中...</p>}
       </div>
 
-      {/* エラーメッセージ */}
       {errorMsg && (
-        <div style={{ backgroundColor: "#ffebee", color: "#c62828", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "14px" }}>
+        <div style={{ backgroundColor: "#ffebee", color: "#c62828", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "13px", boxSizing: "border-box" }}>
           ❌ {errorMsg}
         </div>
       )}
 
-      {/* 処理レポート */}
       {logs && (
-        <div style={{ border: "1px solid #e0e0e0", borderRadius: "12px", padding: "16px", backgroundColor: "#fff", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
-          <h2 style={{ fontSize: "18px", marginTop: 0, marginBottom: "12px", borderBottom: "2px solid #eee", pb: "8px" }}>📊 処理完了レポート</h2>
+        <div style={{ border: "1px solid #e0e0e0", borderRadius: "12px", padding: "16px", backgroundColor: "#fff", boxSizing: "border-box", width: "100%" }}>
+          <h2 style={{ fontSize: "16px", marginTop: 0, marginBottom: "12px", borderBottom: "1px solid #eee", paddingBottom: "8px" }}>📊 処理完了レポート</h2>
           
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px", fontSize: "14px" }}>
-            <div style={{ backgroundColor: "#f9f9f9", padding: "8px 12px", borderRadius: "6px" }}>
-              <div style={{ fontSize: "11px", color: "#666" }}>入力件数</div>
-              <div style={{ fontWeight: "bold", fontSize: "16px" }}>{logs.totalInputRows} 件</div>
+          <div style={{ display: "flex", gap: "8px", marginBottom: "12px", width: "100%", boxSizing: "border-box" }}>
+            <div style={{ flex: 1, backgroundColor: "#f9f9f9", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
+              <div style={{ fontSize: "10px", color: "#666" }}>入力件数</div>
+              <div style={{ fontWeight: "bold", fontSize: "15px" }}>{logs.totalInputRows}件</div>
             </div>
-            <div style={{ backgroundColor: "#e8f5e9", padding: "8px 12px", borderRadius: "6px" }}>
-              <div style={{ fontSize: "11px", color: "#2e7d32" }}>変換成功</div>
-              <div style={{ fontWeight: "bold", fontSize: "16px", color: "#2e7d32" }}>{logs.convertedRows} 件</div>
+            <div style={{ flex: 1, backgroundColor: "#e8f5e9", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
+              <div style={{ fontSize: "10px", color: "#2e7d32" }}>変換成功</div>
+              <div style={{ fontWeight: "bold", fontSize: "15px", color: "#2e7d32" }}>{logs.convertedRows}件</div>
             </div>
           </div>
 
-          <p style={{ fontSize: "13px", color: "#555", margin: "6px 0" }}>
-            📄 <strong>保存名:</strong> {logs.outputFilename}
+          <p style={{ fontSize: "12px", color: "#555", margin: "6px 0", wordBreak: "break-all" }}>
+            📄 <strong>保存名:</strong><br />{logs.outputFilename}
           </p>
 
           {logs.excludedRows > 0 && (
-            <p style={{ fontSize: "12px", color: "#e65100", backgroundColor: "#fff3e0", padding: "8px", borderRadius: "6px", margin: "8px 0" }}>
+            <p style={{ fontSize: "11px", color: "#e65100", backgroundColor: "#fff3e0", padding: "8px", borderRadius: "6px", margin: "8px 0" }}>
               ℹ️ ETC乗降区間など利用日なし {logs.excludedRows} 件を自動除外しました
             </p>
           )}
 
-          {/* プレビュー (スマホ用カード表示) */}
-          <h3 style={{ fontSize: "15px", marginTop: "16px", marginBottom: "8px" }}>▼ プレビュー (先頭5件)</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <h3 style={{ fontSize: "14px", marginTop: "16px", marginBottom: "8px" }}>▼ プレビュー (先頭5件)</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
             {logs.previewData.map((row, idx) => (
-              <div key={idx} style={{ border: "1px solid #eee", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px" }}>
+              <div key={idx} style={{ border: "1px solid #eee", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px", boxSizing: "border-box", width: "100%" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                  <span style={{ color: "#666" }}>{row["取引日"]}</span>
-                  <span style={{ fontWeight: "bold", color: "#d32f2f" }}>￥{row["出金金額（円）"]}</span>
+                  <span style={{ color: "#666", fontSize: "11px" }}>{row["取引日"]}</span>
+                  <span style={{ fontWeight: "bold", color: "#d32f2f", fontSize: "13px" }}>￥{row["出金金額（円）"]}</span>
                 </div>
-                <div style={{ fontWeight: "bold", color: "#333", fontSize: "13px" }}>{row["取引先"]}</div>
+                <div style={{ fontWeight: "bold", color: "#333", fontSize: "12px", wordBreak: "break-all" }}>{row["取引先"]}</div>
               </div>
             ))}
           </div>
 
-          <div style={{ marginTop: "20px", textAlign: "center", padding: "12px", backgroundColor: "#e8f5e9", borderRadius: "8px", color: "#2e7d32", fontWeight: "bold" }}>
+          <div style={{ marginTop: "16px", textAlign: "center", padding: "12px", backgroundColor: "#e8f5e9", borderRadius: "8px", color: "#2e7d32", fontWeight: "bold", fontSize: "13px" }}>
             🎉 自動ダウンロードされました！
           </div>
         </div>
