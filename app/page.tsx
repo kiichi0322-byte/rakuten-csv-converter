@@ -175,16 +175,44 @@ export default function RakutenConverter() {
     setIsProcessing(false);
   };
 
-  const handleManualDownload = () => {
-    if (!logs) return;
-
+  // CSVのBlobを生成する共通関数
+  const generateCsvBlob = () => {
+    if (!logs) return null;
     const csvString = Papa.unparse(logs.convertedData, {
       columns: OUTPUT_HEADERS,
       newline: "\r\n",
     });
-
     const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
-    const blob = new Blob([bom, csvString], { type: "text/csv;charset=utf-8;" });
+    return new Blob([bom, csvString], { type: "text/csv;charset=utf-8;" });
+  };
+
+  // スマホの共有メニューを直接開く処理
+  const handleShare = async () => {
+    const blob = generateCsvBlob();
+    if (!blob || !logs) return;
+
+    // 共有用のFileオブジェクトを作成
+    const file = new File([blob], logs.outputFilename, { type: "text/csv" });
+
+    // Web Share APIがサポートされているか確認
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: "楽天カード明細",
+        });
+      } catch (error) {
+        console.log("共有がキャンセルされたか、エラーが発生しました", error);
+      }
+    } else {
+      alert("お使いの環境は直接共有に対応していません。下の「ダウンロード」ボタンをご利用ください。");
+    }
+  };
+
+  // PC等の通常のダウンロード処理
+  const handleManualDownload = () => {
+    const blob = generateCsvBlob();
+    if (!blob || !logs) return;
 
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -267,39 +295,55 @@ export default function RakutenConverter() {
             </div>
           </div>
 
-          <p style={{ fontSize: "12px", color: "#444444", margin: "6px 0", wordBreak: "break-all" }}>
-            📄 <strong>保存名:</strong><br />{logs.outputFilename}
-          </p>
-
           {logs.excludedRows > 0 && (
             <p style={{ fontSize: "11px", color: "#e65100", backgroundColor: "#fff3e0", padding: "8px", borderRadius: "6px", margin: "8px 0" }}>
-              ℹ️ ETC乗降区間など利用日なし {logs.excludedRows} 件を自動除外しました
+              ℹ️ ETC等利用日なし {logs.excludedRows} 件を除外しました
             </p>
           )}
 
+          {/* アプリ直接共有ボタン（マネフォ向け） */}
+          <button
+            onClick={handleShare}
+            style={{
+              width: "100%",
+              backgroundColor: "#ff7f00",
+              color: "#ffffff",
+              border: "none",
+              padding: "16px",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              fontSize: "16px",
+              cursor: "pointer",
+              margin: "16px 0 8px 0",
+              boxShadow: "0 4px 6px rgba(255,127,0,0.2)"
+            }}
+          >
+            🚀 マネーフォワード等へ直接送る
+          </button>
+
+          {/* 通常のダウンロードボタン */}
           <button
             onClick={handleManualDownload}
             style={{
               width: "100%",
-              backgroundColor: "#2e7d32",
-              color: "#ffffff",
-              border: "none",
-              padding: "14px",
+              backgroundColor: "#f5f5f5",
+              color: "#333333",
+              border: "1px solid #ddd",
+              padding: "12px",
               borderRadius: "8px",
               fontWeight: "bold",
-              fontSize: "15px",
+              fontSize: "14px",
               cursor: "pointer",
-              margin: "16px 0",
-              boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+              marginBottom: "16px"
             }}
           >
-            📥 変換後CSVをダウンロードする
+            📥 端末にダウンロード（保存）する
           </button>
 
-          <h3 style={{ fontSize: "14px", marginTop: "16px", marginBottom: "8px", color: "#1a1a1a" }}>
+          <h3 style={{ fontSize: "14px", marginTop: "8px", marginBottom: "8px", color: "#1a1a1a" }}>
             ▼ プレビュー (全 {logs.convertedData.length} 件)
           </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%", maxHeight: "400px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", boxSizing: "border-box", backgroundColor: "#ffffff" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%", maxHeight: "350px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", boxSizing: "border-box", backgroundColor: "#ffffff" }}>
             {logs.convertedData.map((row, idx) => (
               <div key={idx} style={{ border: "1px solid #e0e0e0", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px", boxSizing: "border-box", width: "100%" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
