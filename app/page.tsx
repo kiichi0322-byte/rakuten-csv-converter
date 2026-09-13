@@ -43,6 +43,10 @@ interface PayPayReportState {
   othersData: Record<string, string>[];
   isCountOk: boolean;
   hasOthers: boolean;
+  targetMonth: number | null;
+  creditFilename: string;
+  balanceFilename: string;
+  othersFilename: string;
 }
 
 export default function MainApp() {
@@ -243,7 +247,7 @@ export default function MainApp() {
           header: true,
           skipEmptyLines: true,
           complete: (results) => {
-            processPayPayData(results.data);
+            processPayPayData(results.data, file.name);
           },
           error: (err: Error) => {
             setPaypayError(`CSVパースエラー: ${err.message}`);
@@ -258,7 +262,7 @@ export default function MainApp() {
     reader.readAsArrayBuffer(file);
   };
 
-  const processPayPayData = (df: Record<string, string>[]) => {
+  const processPayPayData = (df: Record<string, string>[], fileName: string) => {
     const totalRows = df.length;
     if (totalRows === 0) {
       setPaypayError("CSVファイルが空です。");
@@ -272,6 +276,31 @@ export default function MainApp() {
       setPaypayProcessing(false);
       return;
     }
+
+    // 月の判定逻辑 (ファイル名 -> データ内の日付の順)
+    let targetMonth: number | null = null;
+
+    // 1. ファイル名から検出 ("10月", "202310" など)
+    const fileNameMatch = fileName.match(/(\d{1,2})月/) || fileName.match(/\d{4}(\d{2})/);
+    if (fileNameMatch) {
+      targetMonth = parseInt(fileNameMatch[1], 10);
+    }
+
+    // 2. ファイル名から検出できなかった場合、1行目の日付データから検出
+    if (targetMonth === null) {
+      for (const row of df) {
+        const rawDate = row["取引日時"] || row["取引日"] || "";
+        if (rawDate) {
+          const dateObj = new Date(rawDate.replace(/\//g, "-"));
+          if (!isNaN(dateObj.getTime())) {
+            targetMonth = dateObj.getMonth() + 1;
+            break;
+          }
+        }
+      }
+    }
+
+    const monthPrefix = targetMonth ? `${targetMonth}月分_` : "";
 
     const dfFiltered = df.filter((row) => (row["取引方法"] || "").trim() !== "PayPayポイント");
     const excludedPoints = totalRows - dfFiltered.length;
@@ -302,6 +331,10 @@ export default function MainApp() {
       othersData: dfOthers,
       isCountOk,
       hasOthers,
+      targetMonth,
+      creditFilename: `PayPayクレジット_${monthPrefix}VISA6099.csv`,
+      balanceFilename: `PayPay残高払い_${monthPrefix}抽出.csv`,
+      othersFilename: `PayPay未分類_${monthPrefix}要確認.csv`,
     });
 
     if (dfCredit.length > 0) {
@@ -580,10 +613,10 @@ export default function MainApp() {
                 </div>
               </div>
 
-              {/* 各CSV個別ダウンロードボタン */}
+              {/* 各CSV個別ダウンロードボタン（命名ルール適用） */}
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
                 <button
-                  onClick={() => handlePaypayDownload(paypayReport.creditData, "credit_visa_6099.csv")}
+                  onClick={() => handlePaypayDownload(paypayReport.creditData, paypayReport.creditFilename)}
                   disabled={paypayReport.creditData.length === 0}
                   style={{
                     width: "100%",
@@ -593,15 +626,17 @@ export default function MainApp() {
                     padding: "12px",
                     borderRadius: "8px",
                     fontWeight: "bold",
-                    fontSize: "14px",
-                    cursor: paypayReport.creditData.length > 0 ? "pointer" : "not-allowed"
+                    fontSize: "13px",
+                    cursor: paypayReport.creditData.length > 0 ? "pointer" : "not-allowed",
+                    textAlign: "left"
                   }}
                 >
-                  📥 クレジット抽出を保存 ({paypayReport.creditData.length}件)
+                  📥 クレジット保存 ({paypayReport.creditData.length}件)<br />
+                  <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal" }}>📄 {paypayReport.creditFilename}</span>
                 </button>
 
                 <button
-                  onClick={() => handlePaypayDownload(paypayReport.paypayBalanceData, "paypay_zandaka.csv")}
+                  onClick={() => handlePaypayDownload(paypayReport.paypayBalanceData, paypayReport.balanceFilename)}
                   disabled={paypayReport.paypayBalanceData.length === 0}
                   style={{
                     width: "100%",
@@ -611,16 +646,18 @@ export default function MainApp() {
                     padding: "12px",
                     borderRadius: "8px",
                     fontWeight: "bold",
-                    fontSize: "14px",
-                    cursor: paypayReport.paypayBalanceData.length > 0 ? "pointer" : "not-allowed"
+                    fontSize: "13px",
+                    cursor: paypayReport.paypayBalanceData.length > 0 ? "pointer" : "not-allowed",
+                    textAlign: "left"
                   }}
                 >
-                  📥 残高払い抽出を保存 ({paypayReport.paypayBalanceData.length}件)
+                  📥 残高払い保存 ({paypayReport.paypayBalanceData.length}件)<br />
+                  <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal" }}>📄 {paypayReport.balanceFilename}</span>
                 </button>
 
                 {paypayReport.hasOthers && (
                   <button
-                    onClick={() => handlePaypayDownload(paypayReport.othersData, "check_others.csv")}
+                    onClick={() => handlePaypayDownload(paypayReport.othersData, paypayReport.othersFilename)}
                     style={{
                       width: "100%",
                       backgroundColor: "#e65100",
@@ -629,11 +666,13 @@ export default function MainApp() {
                       padding: "12px",
                       borderRadius: "8px",
                       fontWeight: "bold",
-                      fontSize: "14px",
-                      cursor: "pointer"
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      textAlign: "left"
                     }}
                   >
-                    ⚠️ 未分類(その他)を保存 ({paypayReport.othersData.length}件)
+                    ⚠️ 未分類(その他)保存 ({paypayReport.othersData.length}件)<br />
+                    <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal" }}>📄 {paypayReport.othersFilename}</span>
                   </button>
                 )}
               </div>
