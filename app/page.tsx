@@ -33,11 +33,13 @@ interface RakutenLogState {
   outputFilename: string;
   isMatch: boolean;
   convertedData: Record<string, string>[];
+  excludedData: Record<string, string>[];
 }
 
 interface PayPayReportState {
   totalRows: number;
   excludedPoints: number;
+  excludedPointData: Record<string, string>[];
   creditData: Record<string, string>[];
   paypayBalanceData: Record<string, string>[];
   othersData: Record<string, string>[];
@@ -124,6 +126,7 @@ export default function MainApp() {
       const dateStr = row["利用日"]?.trim();
       return dateStr && !isNaN(Date.parse(dateStr.replace(/\//g, "-")));
     });
+    const excludedData = rawData.filter((row) => !validRows.includes(row));
 
     const excludedRows = totalInputRows - validRows.length;
     const convertedRows = validRows.length;
@@ -193,6 +196,7 @@ export default function MainApp() {
       outputFilename,
       isMatch: totalInputRows === convertedRows + excludedRows,
       convertedData,
+      excludedData,
     });
     setRakutenProcessing(false);
   };
@@ -223,7 +227,7 @@ export default function MainApp() {
   const [paypayReport, setPaypayReport] = useState<PayPayReportState | null>(null);
   const [paypayError, setPaypayError] = useState<string>("");
   const [paypayProcessing, setPaypayProcessing] = useState<boolean>(false);
-  const [previewTab, setPreviewTab] = useState<"credit" | "balance" | "others">("credit");
+  const [previewTab, setPreviewTab] = useState<"credit" | "balance" | "others" | "excluded">("credit");
   const [downloadedPayPayFiles, setDownloadedPayPayFiles] = useState<Record<string, boolean>>({});
 
   const handlePaypayUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -305,8 +309,9 @@ export default function MainApp() {
 
     const monthPrefix = targetMonth ? `${targetMonth}月分_` : "";
 
+    const excludedPointData = df.filter((row) => (row["取引方法"] || "").trim() === "PayPayポイント");
     const dfFiltered = df.filter((row) => (row["取引方法"] || "").trim() !== "PayPayポイント");
-    const excludedPoints = totalRows - dfFiltered.length;
+    const excludedPoints = excludedPointData.length;
 
     const creditTargets = ["クレジット VISA 6099", "PayPayカード VISA 6099"];
     const dfCredit = dfFiltered.filter((row) =>
@@ -329,6 +334,7 @@ export default function MainApp() {
     setPaypayReport({
       totalRows,
       excludedPoints,
+      excludedPointData,
       creditData: dfCredit,
       paypayBalanceData: dfPaypayBalance,
       othersData: dfOthers,
@@ -372,6 +378,7 @@ export default function MainApp() {
     if (!paypayReport) return [];
     if (previewTab === "credit") return paypayReport.creditData;
     if (previewTab === "balance") return paypayReport.paypayBalanceData;
+    if (previewTab === "excluded") return paypayReport.excludedPointData;
     return paypayReport.othersData;
   };
 
@@ -494,9 +501,20 @@ export default function MainApp() {
               </p>
 
               {rakutenLogs.excludedRows > 0 && (
-                <p style={{ fontSize: "11px", color: "#e65100", backgroundColor: "#fff3e0", padding: "8px", borderRadius: "6px", margin: "8px 0" }}>
-                  ℹ️ ETC乗降区間など利用日なし {rakutenLogs.excludedRows} 件を自動除外しました
-                </p>
+                <details style={{ fontSize: "11px", color: "#7a4300", backgroundColor: "#fff3e0", padding: "8px", borderRadius: "6px", margin: "8px 0" }}>
+                  <summary style={{ cursor: "pointer", fontWeight: "bold" }}>
+                    ℹ️ ETC乗降区間など利用日なし {rakutenLogs.excludedRows} 件を自動除外しました（タップして確認）
+                  </summary>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto", marginTop: "8px" }}>
+                    {rakutenLogs.excludedData.map((row, idx) => (
+                      <div key={idx} style={{ backgroundColor: "#ffffff", border: "1px solid #ffd39b", borderRadius: "6px", padding: "8px" }}>
+                        <div>#{idx + 1} | 利用日: {row["利用日"] || "未入力"}</div>
+                        <div style={{ fontWeight: "bold", marginTop: "2px", wordBreak: "break-all" }}>{row["利用店名・商品名"] || "内容なし"}</div>
+                        {row["支払総額"] && <div style={{ marginTop: "2px" }}>金額: ￥{row["支払総額"]}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </details>
               )}
 
               <button
@@ -770,6 +788,23 @@ export default function MainApp() {
                     }}
                   >
                     未分類 ({paypayReport.othersData.length})
+                  </button>
+                  <button
+                    onClick={() => setPreviewTab("excluded")}
+                    style={{
+                      flex: 1,
+                      padding: "8px 2px",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      backgroundColor: previewTab === "excluded" ? "#ffffff" : "transparent",
+                      color: previewTab === "excluded" ? "#7a4300" : "#666666",
+                      boxShadow: previewTab === "excluded" ? "0 1px 2px rgba(0,0,0,0.1)" : "none"
+                    }}
+                  >
+                    除外 ({paypayReport.excludedPoints})
                   </button>
                 </div>
 
