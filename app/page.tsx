@@ -26,7 +26,7 @@ interface LogState {
   excludedRows: number;
   outputFilename: string;
   isMatch: boolean;
-  previewData: Record<string, string>[];
+  convertedData: Record<string, string>[];
 }
 
 export default function RakutenConverter() {
@@ -169,16 +169,16 @@ export default function RakutenConverter() {
       excludedRows,
       outputFilename,
       isMatch: totalInputRows === convertedRows + excludedRows,
-      previewData: convertedData.slice(0, 5),
+      convertedData,
     });
 
     setIsProcessing(false);
-
-    downloadCsv(convertedData, outputFilename);
   };
 
-  const downloadCsv = (data: Record<string, string>[], filename: string) => {
-    const csvString = Papa.unparse(data, {
+  const handleManualDownload = () => {
+    if (!logs) return;
+
+    const csvString = Papa.unparse(logs.convertedData, {
       columns: OUTPUT_HEADERS,
       newline: "\r\n",
     });
@@ -189,7 +189,7 @@ export default function RakutenConverter() {
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", filename);
+    link.setAttribute("download", logs.outputFilename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -276,21 +276,39 @@ export default function RakutenConverter() {
             </p>
           )}
 
-          <h3 style={{ fontSize: "14px", marginTop: "16px", marginBottom: "8px" }}>▼ プレビュー (先頭5件)</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
-            {logs.previewData.map((row, idx) => (
-              <div key={idx} style={{ border: "1px solid #eee", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px", boxSizing: "border-box", width: "100%" }}>
+          {/* 手動ダウンロードボタン */}
+          <button
+            onClick={handleManualDownload}
+            style={{
+              width: "100%",
+              backgroundColor: "#2e7d32",
+              color: "#fff",
+              border: "none",
+              padding: "14px",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              fontSize: "15px",
+              cursor: "pointer",
+              margin: "16px 0",
+              boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+            }}
+          >
+            📥 変換後CSVをダウンロードする
+          </button>
+
+          <h3 style={{ fontSize: "14px", marginTop: "16px", marginBottom: "8px" }}>
+            ▼ プレビュー (全 {logs.convertedData.length} 件)
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%", maxHeight: "400px", overflowY: "auto", border: "1px solid #eee", padding: "8px", borderRadius: "8px", boxSizing: "border-box" }}>
+            {logs.convertedData.map((row, idx) => (
+              <div key={idx} style={{ border: "1px solid #e0e0e0", borderRadius: "8px", padding: "10px", backgroundColor: "#fafafa", fontSize: "12px", boxSizing: "border-box", width: "100%" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                  <span style={{ color: "#666", fontSize: "11px" }}>{row["取引日"]}</span>
+                  <span style={{ color: "#666", fontSize: "11px" }}>#{idx + 1} | {row["取引日"]}</span>
                   <span style={{ fontWeight: "bold", color: "#d32f2f", fontSize: "13px" }}>￥{row["出金金額（円）"]}</span>
                 </div>
                 <div style={{ fontWeight: "bold", color: "#333", fontSize: "12px", wordBreak: "break-all" }}>{row["取引先"]}</div>
               </div>
             ))}
-          </div>
-
-          <div style={{ marginTop: "16px", textAlign: "center", padding: "12px", backgroundColor: "#e8f5e9", borderRadius: "8px", color: "#2e7d32", fontWeight: "bold", fontSize: "13px" }}>
-            🎉 自動ダウンロードされました！
           </div>
         </div>
       )}
