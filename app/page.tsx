@@ -58,6 +58,7 @@ export default function MainApp() {
   const [rakutenLogs, setRakutenLogs] = useState<RakutenLogState | null>(null);
   const [rakutenError, setRakutenError] = useState<string>("");
   const [rakutenProcessing, setRakutenProcessing] = useState<boolean>(false);
+  const [rakutenDownloaded, setRakutenDownloaded] = useState<boolean>(false);
 
   const handleRakutenUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -66,6 +67,7 @@ export default function MainApp() {
     setRakutenProcessing(true);
     setRakutenError("");
     setRakutenLogs(null);
+    setRakutenDownloaded(false);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -211,6 +213,8 @@ export default function MainApp() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    setRakutenDownloaded(true);
   };
 
   // ----------------------------------------------------------------------
@@ -220,6 +224,7 @@ export default function MainApp() {
   const [paypayError, setPaypayError] = useState<string>("");
   const [paypayProcessing, setPaypayProcessing] = useState<boolean>(false);
   const [previewTab, setPreviewTab] = useState<"credit" | "balance" | "others">("credit");
+  const [downloadedPayPayFiles, setDownloadedPayPayFiles] = useState<Record<string, boolean>>({});
 
   const handlePaypayUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -228,6 +233,7 @@ export default function MainApp() {
     setPaypayProcessing(true);
     setPaypayError("");
     setPaypayReport(null);
+    setDownloadedPayPayFiles({});
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -277,16 +283,13 @@ export default function MainApp() {
       return;
     }
 
-    // 月の判定逻辑 (ファイル名 -> データ内の日付の順)
     let targetMonth: number | null = null;
 
-    // 1. ファイル名から検出 ("10月", "202310" など)
     const fileNameMatch = fileName.match(/(\d{1,2})月/) || fileName.match(/\d{4}(\d{2})/);
     if (fileNameMatch) {
       targetMonth = parseInt(fileNameMatch[1], 10);
     }
 
-    // 2. ファイル名から検出できなかった場合、1行目の日付データから検出
     if (targetMonth === null) {
       for (const row of df) {
         const rawDate = row["取引日時"] || row["取引日"] || "";
@@ -348,7 +351,7 @@ export default function MainApp() {
     setPaypayProcessing(false);
   };
 
-  const handlePaypayDownload = (data: Record<string, string>[], filename: string) => {
+  const handlePaypayDownload = (data: Record<string, string>[], filename: string, key: string) => {
     if (!data || data.length === 0) return;
     const csvString = Papa.unparse(data, { newline: "\r\n" });
     const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
@@ -361,6 +364,8 @@ export default function MainApp() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    setDownloadedPayPayFiles((prev) => ({ ...prev, [key]: true }));
   };
 
   const getActivePreviewData = () => {
@@ -498,7 +503,7 @@ export default function MainApp() {
                 onClick={handleRakutenDownload}
                 style={{
                   width: "100%",
-                  backgroundColor: "#2e7d32",
+                  backgroundColor: rakutenDownloaded ? "#4caf50" : "#2e7d32",
                   color: "#ffffff",
                   border: "none",
                   padding: "16px",
@@ -507,10 +512,14 @@ export default function MainApp() {
                   fontSize: "15px",
                   cursor: "pointer",
                   margin: "16px 0",
-                  boxShadow: "0 4px 6px rgba(46,125,50,0.2)"
+                  boxShadow: "0 4px 6px rgba(46,125,50,0.2)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px"
                 }}
               >
-                📥 変換後CSVを保存する
+                {rakutenDownloaded ? "✅ 保存済み (再ダウンロード)" : "📥 変換後CSVを保存する"}
               </button>
 
               <h3 style={{ fontSize: "13px", marginTop: "16px", marginBottom: "8px", color: "#1a1a1a" }}>
@@ -613,14 +622,14 @@ export default function MainApp() {
                 </div>
               </div>
 
-              {/* 各CSV個別ダウンロードボタン（命名ルール適用） */}
+              {/* 各CSV個別ダウンロードボタン（保存済みステータス付き） */}
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
                 <button
-                  onClick={() => handlePaypayDownload(paypayReport.creditData, paypayReport.creditFilename)}
+                  onClick={() => handlePaypayDownload(paypayReport.creditData, paypayReport.creditFilename, "credit")}
                   disabled={paypayReport.creditData.length === 0}
                   style={{
                     width: "100%",
-                    backgroundColor: paypayReport.creditData.length > 0 ? "#0066cc" : "#ccc",
+                    backgroundColor: paypayReport.creditData.length === 0 ? "#ccc" : downloadedPayPayFiles["credit"] ? "#2e7d32" : "#0066cc",
                     color: "#ffffff",
                     border: "none",
                     padding: "12px",
@@ -628,19 +637,28 @@ export default function MainApp() {
                     fontWeight: "bold",
                     fontSize: "13px",
                     cursor: paypayReport.creditData.length > 0 ? "pointer" : "not-allowed",
-                    textAlign: "left"
+                    textAlign: "left",
+                    position: "relative",
+                    transition: "background-color 0.2s"
                   }}
                 >
-                  📥 クレジット保存 ({paypayReport.creditData.length}件)<br />
-                  <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal" }}>📄 {paypayReport.creditFilename}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>📥 クレジット保存 ({paypayReport.creditData.length}件)</span>
+                    {downloadedPayPayFiles["credit"] && (
+                      <span style={{ backgroundColor: "#ffffff", color: "#2e7d32", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: "bold" }}>
+                        ✅ 保存済み
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal", display: "block", marginTop: "2px" }}>📄 {paypayReport.creditFilename}</span>
                 </button>
 
                 <button
-                  onClick={() => handlePaypayDownload(paypayReport.paypayBalanceData, paypayReport.balanceFilename)}
+                  onClick={() => handlePaypayDownload(paypayReport.paypayBalanceData, paypayReport.balanceFilename, "balance")}
                   disabled={paypayReport.paypayBalanceData.length === 0}
                   style={{
                     width: "100%",
-                    backgroundColor: paypayReport.paypayBalanceData.length > 0 ? "#ff0033" : "#ccc",
+                    backgroundColor: paypayReport.paypayBalanceData.length === 0 ? "#ccc" : downloadedPayPayFiles["balance"] ? "#2e7d32" : "#ff0033",
                     color: "#ffffff",
                     border: "none",
                     padding: "12px",
@@ -648,19 +666,28 @@ export default function MainApp() {
                     fontWeight: "bold",
                     fontSize: "13px",
                     cursor: paypayReport.paypayBalanceData.length > 0 ? "pointer" : "not-allowed",
-                    textAlign: "left"
+                    textAlign: "left",
+                    position: "relative",
+                    transition: "background-color 0.2s"
                   }}
                 >
-                  📥 残高払い保存 ({paypayReport.paypayBalanceData.length}件)<br />
-                  <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal" }}>📄 {paypayReport.balanceFilename}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>📥 残高払い保存 ({paypayReport.paypayBalanceData.length}件)</span>
+                    {downloadedPayPayFiles["balance"] && (
+                      <span style={{ backgroundColor: "#ffffff", color: "#2e7d32", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: "bold" }}>
+                        ✅ 保存済み
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal", display: "block", marginTop: "2px" }}>📄 {paypayReport.balanceFilename}</span>
                 </button>
 
                 {paypayReport.hasOthers && (
                   <button
-                    onClick={() => handlePaypayDownload(paypayReport.othersData, paypayReport.othersFilename)}
+                    onClick={() => handlePaypayDownload(paypayReport.othersData, paypayReport.othersFilename, "others")}
                     style={{
                       width: "100%",
-                      backgroundColor: "#e65100",
+                      backgroundColor: downloadedPayPayFiles["others"] ? "#2e7d32" : "#e65100",
                       color: "#ffffff",
                       border: "none",
                       padding: "12px",
@@ -668,11 +695,20 @@ export default function MainApp() {
                       fontWeight: "bold",
                       fontSize: "13px",
                       cursor: "pointer",
-                      textAlign: "left"
+                      textAlign: "left",
+                      position: "relative",
+                      transition: "background-color 0.2s"
                     }}
                   >
-                    ⚠️ 未分類(その他)保存 ({paypayReport.othersData.length}件)<br />
-                    <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal" }}>📄 {paypayReport.othersFilename}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>⚠️ 未分類(その他)保存 ({paypayReport.othersData.length}件)</span>
+                      {downloadedPayPayFiles["others"] && (
+                        <span style={{ backgroundColor: "#ffffff", color: "#2e7d32", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: "bold" }}>
+                          ✅ 保存済み
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: "10px", opacity: 0.85, fontWeight: "normal", display: "block", marginTop: "2px" }}>📄 {paypayReport.othersFilename}</span>
                   </button>
                 )}
               </div>
